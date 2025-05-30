@@ -2,6 +2,52 @@ import * as SQLite from "expo-sqlite";
 
 let db: SQLite.SQLiteDatabase | null = null;
 
+interface Exercise {
+  name: string;
+  muscles: string[];
+}
+
+interface DbRow {
+  id: number;
+  [key: string]: any;
+}
+
+// Preset exercises with their associated muscle groups
+const presetExercises: Exercise[] = [
+  {
+    name: "Bench Press",
+    muscles: ["Chest", "Triceps", "Front Deltoids"],
+  },
+  {
+    name: "Bicep Curls",
+    muscles: ["Biceps"],
+  },
+  {
+    name: "Squats",
+    muscles: ["Quadriceps", "Hamstrings", "Glutes"],
+  },
+  {
+    name: "Deadlift",
+    muscles: ["Lower Back", "Hamstrings", "Glutes", "Trapezius"],
+  },
+  {
+    name: "Pull-ups",
+    muscles: ["Latissimus Dorsi", "Biceps", "Rear Deltoids"],
+  },
+  {
+    name: "Shoulder Press",
+    muscles: ["Front Deltoids", "Middle Deltoids", "Triceps"],
+  },
+  {
+    name: "Tricep Pushdown",
+    muscles: ["Triceps"],
+  },
+  {
+    name: "Lat Pulldown",
+    muscles: ["Latissimus Dorsi", "Biceps"],
+  },
+];
+
 export const initDatabase = async () => {
   if (!db) {
     db = await SQLite.openDatabaseAsync("workoutTracker.db");
@@ -40,8 +86,83 @@ export const initDatabase = async () => {
         FOREIGN KEY (muscle_id) REFERENCES Muscles(id)
       );`
     );
+
+    // Load preset data
+    await loadPresetData();
   }
   return db;
+};
+
+const loadPresetData = async () => {
+  const database = await getDb();
+
+  // Helper function to add a muscle if it doesn't exist
+  const addMuscleIfNotExists = async (muscleName: string) => {
+    try {
+      const existingMuscle = await database.getFirstAsync<DbRow>(
+        "SELECT id FROM Muscles WHERE muscle_name = ?;",
+        [muscleName]
+      );
+      if (!existingMuscle) {
+        const result = await database.runAsync(
+          "INSERT INTO Muscles (muscle_name) VALUES (?);",
+          [muscleName]
+        );
+        return result.lastInsertRowId;
+      }
+      return existingMuscle.id;
+    } catch (error) {
+      console.error(`Error adding muscle ${muscleName}:`, error);
+      throw error;
+    }
+  };
+
+  // Helper function to add an exercise if it doesn't exist
+  const addExerciseIfNotExists = async (exerciseName: string) => {
+    try {
+      const existingExercise = await database.getFirstAsync<DbRow>(
+        "SELECT id FROM Exercises WHERE exercise_name = ?;",
+        [exerciseName]
+      );
+      if (!existingExercise) {
+        const result = await database.runAsync(
+          "INSERT INTO Exercises (exercise_name) VALUES (?);",
+          [exerciseName]
+        );
+        return result.lastInsertRowId;
+      }
+      return existingExercise.id;
+    } catch (error) {
+      console.error(`Error adding exercise ${exerciseName}:`, error);
+      throw error;
+    }
+  };
+
+  // Add all preset exercises and their muscle associations
+  for (const exercise of presetExercises) {
+    try {
+      const exerciseId = await addExerciseIfNotExists(exercise.name);
+
+      for (const muscleName of exercise.muscles) {
+        const muscleId = await addMuscleIfNotExists(muscleName);
+
+        // Link exercise with muscle if not already linked
+        const existingLink = await database.getFirstAsync(
+          "SELECT 1 FROM Exercise_Muscles WHERE exercise_id = ? AND muscle_id = ?;",
+          [exerciseId, muscleId]
+        );
+
+        if (!existingLink) {
+          await database.runAsync(
+            "INSERT INTO Exercise_Muscles (exercise_id, muscle_id) VALUES (?, ?);",
+            [exerciseId, muscleId]
+          );
+        }
+      }
+    } catch (error) {
+      console.error(`Error processing exercise ${exercise.name}:`, error);
+    }
+  }
 };
 
 const getDb = async () => {

@@ -94,7 +94,8 @@ function CreateWorkout() {
         );
       }
 
-      router.push("/workout/select");
+      // Navigate back to the select screen
+      router.back();
     } catch (error) {
       console.error("Error saving workout:", error);
     }
@@ -117,50 +118,60 @@ function CreateWorkout() {
       </View>
 
       {/* Workout Name Input */}
-      <TextInput
-        style={styles.workoutNameInput}
-        placeholder="Workout Name"
-        value={workoutName}
-        onChangeText={setWorkoutName}
-      />
+      <View style={styles.workoutNameContainer}>
+        <Text style={styles.workoutNameLabel}>Workout Name</Text>
+        <TextInput
+          style={styles.workoutNameInput}
+          value={workoutName}
+          onChangeText={setWorkoutName}
+          placeholder="Enter workout name"
+          placeholderTextColor="#999"
+        />
+      </View>
 
       {/* Exercise List */}
       <ScrollView style={styles.exerciseList}>
         {exercises.map((exercise, index) => (
           <View key={`${exercise.id}-${index}`} style={styles.exerciseItem}>
-            <Text style={styles.exerciseName}>{exercise.name}</Text>
-            <View style={styles.exerciseControls}>
+            <View style={styles.exerciseHeader}>
+              <Text style={styles.exerciseName}>{exercise.name}</Text>
               <View style={styles.singleArmControl}>
-                <Text style={styles.controlLabel}>Single Arm</Text>
+                <Text style={styles.singleArmLabel}>Single Arm</Text>
                 <Switch
                   value={exercise.singleArm}
                   onValueChange={() => handleToggleSingleArm(index)}
                 />
               </View>
-              <View style={styles.setsControl}>
-                <TouchableOpacity
-                  onPress={() => handleUpdateSets(index, false)}
-                >
-                  <Ionicons name="remove-circle" size={24} color="#007AFF" />
-                </TouchableOpacity>
-                <Text style={styles.setsText}>{exercise.sets} sets</Text>
-                <TouchableOpacity onPress={() => handleUpdateSets(index, true)}>
-                  <Ionicons name="add-circle" size={24} color="#007AFF" />
-                </TouchableOpacity>
-              </View>
+            </View>
+            <View style={styles.setsControl}>
+              <TouchableOpacity
+                onPress={() => handleUpdateSets(index, false)}
+                style={styles.setButton}
+              >
+                <Ionicons name="remove-circle" size={24} color="#007AFF" />
+              </TouchableOpacity>
+              <Text style={styles.setsText}>{exercise.sets} sets</Text>
+              <TouchableOpacity
+                onPress={() => handleUpdateSets(index, true)}
+                style={styles.setButton}
+              >
+                <Ionicons name="add-circle" size={24} color="#007AFF" />
+              </TouchableOpacity>
             </View>
           </View>
         ))}
-      </ScrollView>
 
-      {/* Add Exercise Button */}
-      <TouchableOpacity
-        style={styles.addExerciseButton}
-        onPress={handleOpenExerciseModal}
-      >
-        <Ionicons name="add-circle" size={32} color="#007AFF" />
-        <Text style={styles.addExerciseText}>Add Exercise</Text>
-      </TouchableOpacity>
+        {/* Add Exercise Button */}
+        <TouchableOpacity
+          style={[styles.exerciseItem, styles.addExerciseButton]}
+          onPress={handleOpenExerciseModal}
+        >
+          <View style={styles.addExerciseContent}>
+            <Ionicons name="add-circle" size={24} color="#007AFF" />
+            <Text style={styles.addExerciseText}>Add Exercise</Text>
+          </View>
+        </TouchableOpacity>
+      </ScrollView>
 
       {/* Exercise Selection Modal */}
       <Modal
@@ -227,12 +238,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-  workoutNameInput: {
+  workoutNameContainer: {
     backgroundColor: "white",
     padding: 16,
     margin: 16,
     borderRadius: 10,
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  workoutNameLabel: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 8,
+    fontWeight: "500",
+  },
+  workoutNameInput: {
     fontSize: 16,
+    color: "#333",
+    padding: 0,
   },
   exerciseList: {
     flex: 1,
@@ -252,42 +281,55 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
-  exerciseName: {
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 12,
-  },
-  exerciseControls: {
+  exerciseHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginBottom: 12,
+  },
+  exerciseName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#333",
+    flex: 1,
   },
   singleArmControl: {
     flexDirection: "row",
     alignItems: "center",
+    marginLeft: 8,
   },
-  controlLabel: {
-    marginRight: 8,
-    fontSize: 14,
+  singleArmLabel: {
+    fontSize: 12,
     color: "#666",
+    marginRight: 8,
   },
   setsControl: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f5f5f5",
+    padding: 8,
+    borderRadius: 8,
+  },
+  setButton: {
+    padding: 4,
   },
   setsText: {
-    marginHorizontal: 12,
+    marginHorizontal: 16,
     fontSize: 14,
-    color: "#666",
+    color: "#333",
+    fontWeight: "500",
+    minWidth: 50,
+    textAlign: "center",
   },
   addExerciseButton: {
+    marginBottom: 32, // Add extra margin at the bottom for better scrolling
+  },
+  addExerciseContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    padding: 16,
-    backgroundColor: "white",
-    borderTopWidth: 1,
-    borderTopColor: "#e1e1e1",
+    padding: 8,
   },
   addExerciseText: {
     marginLeft: 8,

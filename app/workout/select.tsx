@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Link, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { useRouter } from "expo-router";
+import { useCallback, useState } from "react";
 import {
   Dimensions,
   ScrollView,
@@ -24,23 +25,39 @@ function SelectWorkout() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const router = useRouter();
 
-  useEffect(() => {
-    const loadWorkouts = async () => {
-      try {
-        const savedWorkouts = (await getWorkouts()) as Workout[];
-        setWorkouts(savedWorkouts);
-      } catch (error) {
-        console.error("Error loading workouts:", error);
-      }
-    };
+  // Use useFocusEffect to reload workouts when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      const loadWorkouts = async () => {
+        try {
+          const savedWorkouts = (await getWorkouts()) as Workout[];
+          setWorkouts([
+            ...savedWorkouts,
+            { id: -1, workout_name: "Create Workout" }, // Add create workout as last item
+          ]);
+        } catch (error) {
+          console.error("Error loading workouts:", error);
+        }
+      };
 
-    loadWorkouts();
-  }, []);
+      loadWorkouts();
+    }, [])
+  );
 
   // Calculate item width based on screen width
   const screenWidth = Dimensions.get("window").width;
   const itemWidth =
     (screenWidth - SCREEN_PADDING * 2 - GRID_GAP) / ITEMS_PER_ROW;
+
+  const handleWorkoutPress = (workout: Workout) => {
+    if (workout.id === -1) {
+      // This is the create workout button
+      router.push("/workout/new");
+    } else {
+      // Handle regular workout selection
+      // Navigate to workout detail/start page
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -60,21 +77,6 @@ function SelectWorkout() {
         style={styles.scrollContainer}
         contentContainerStyle={styles.gridContainer}
       >
-        {/* Create New Workout Button */}
-        <Link href="/workout/new" asChild>
-          <TouchableOpacity
-            style={[
-              styles.workoutItem,
-              styles.createWorkoutItem,
-              { width: itemWidth, height: itemWidth },
-            ]}
-          >
-            <Ionicons name="add" size={32} color="#007AFF" />
-            <Text style={styles.createWorkoutText}>Create Workout</Text>
-          </TouchableOpacity>
-        </Link>
-
-        {/* Existing Workouts */}
         {workouts.map((workout) => (
           <TouchableOpacity
             key={workout.id}
@@ -82,11 +84,21 @@ function SelectWorkout() {
               styles.workoutItem,
               { width: itemWidth, height: itemWidth },
             ]}
-            onPress={() => {
-              // Navigate to workout detail/start page
-            }}
+            onPress={() => handleWorkoutPress(workout)}
           >
-            <Text style={styles.workoutName}>{workout.workout_name}</Text>
+            {workout.id === -1 ? (
+              <>
+                <Ionicons
+                  name="add"
+                  size={32}
+                  color="#333"
+                  style={styles.createIcon}
+                />
+                <Text style={styles.workoutName}>{workout.workout_name}</Text>
+              </>
+            ) : (
+              <Text style={styles.workoutName}>{workout.workout_name}</Text>
+            )}
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -140,21 +152,13 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
-  createWorkoutItem: {
-    borderWidth: 2,
-    borderColor: "#007AFF",
-    borderStyle: "dashed",
-    backgroundColor: "rgba(0, 122, 255, 0.1)",
-  },
-  createWorkoutText: {
-    marginTop: 8,
-    fontSize: 16,
-    color: "#007AFF",
-    textAlign: "center",
-  },
   workoutName: {
     fontSize: 16,
     fontWeight: "600",
     textAlign: "center",
+    color: "#333",
+  },
+  createIcon: {
+    marginBottom: 8,
   },
 });
