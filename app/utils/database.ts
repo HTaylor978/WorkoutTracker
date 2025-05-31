@@ -263,5 +263,85 @@ export const addExerciseToWorkout = async (
   return true;
 };
 
+// Delete a workout and its associated table
+export const deleteWorkout = async (workoutId: number, workoutName: string) => {
+  const database = await getDb();
+  const tableName = `Workout_${workoutName.replace(/\s+/g, "_")}`;
+
+  try {
+    // Delete the workout's table
+    await database.execAsync(`DROP TABLE IF EXISTS ${tableName};`);
+
+    // Delete the workout from the Workouts table
+    await database.runAsync("DELETE FROM Workouts WHERE id = ?;", [workoutId]);
+
+    return true;
+  } catch (error) {
+    console.error("Error deleting workout:", error);
+    throw error;
+  }
+};
+
+// Get exercises for a specific workout
+export const getWorkoutExercises = async (workoutName: string) => {
+  const database = await getDb();
+  const tableName = `Workout_${workoutName.replace(/\s+/g, "_")}`;
+
+  try {
+    const exercises = await database.getAllAsync(
+      `SELECT e.id, e.exercise_name, w.sets_per_exercise, w.single_arm
+       FROM ${tableName} w
+       JOIN Exercises e ON w.exercise_id = e.id;`
+    );
+    return exercises;
+  } catch (error) {
+    console.error("Error getting workout exercises:", error);
+    throw error;
+  }
+};
+
+// Update a workout
+export const updateWorkout = async (
+  workoutId: number,
+  oldWorkoutName: string,
+  newWorkoutName: string,
+  exercises: { id: number; sets: number; singleArm: boolean }[]
+) => {
+  const database = await getDb();
+  const oldTableName = `Workout_${oldWorkoutName.replace(/\s+/g, "_")}`;
+  const newTableName = `Workout_${newWorkoutName.replace(/\s+/g, "_")}`;
+
+  try {
+    // Update workout name in Workouts table if it changed
+    if (oldWorkoutName !== newWorkoutName) {
+      await database.runAsync(
+        "UPDATE Workouts SET workout_name = ? WHERE id = ?;",
+        [newWorkoutName, workoutId]
+      );
+
+      // Rename the workout table
+      await database.execAsync(
+        `ALTER TABLE ${oldTableName} RENAME TO ${newTableName};`
+      );
+    }
+
+    // Clear existing exercises
+    await database.execAsync(`DELETE FROM ${newTableName};`);
+
+    // Add new exercises
+    for (const exercise of exercises) {
+      await database.runAsync(
+        `INSERT INTO ${newTableName} (exercise_id, sets_per_exercise, single_arm) VALUES (?, ?, ?);`,
+        [exercise.id, exercise.sets, exercise.singleArm ? 1 : 0]
+      );
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error updating workout:", error);
+    throw error;
+  }
+};
+
 // Export an empty object as default to satisfy Expo Router
 export default {};

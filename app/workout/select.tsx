@@ -54,8 +54,11 @@ function SelectWorkout() {
       // This is the create workout button
       router.push("/workout/new");
     } else {
-      // Handle regular workout selection
-      // Navigate to workout detail/start page
+      // Navigate to start workout screen with workout details
+      router.push({
+        pathname: "/workout/start",
+        params: { id: workout.id, name: workout.workout_name },
+      });
     }
   };
 

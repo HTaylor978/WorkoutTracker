@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useState } from "react";
 import {
   Modal,
   ScrollView,
@@ -10,12 +10,15 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Alert,
 } from "react-native";
 import {
   addExerciseToWorkout,
   addWorkout,
   createWorkoutTable,
   getExercises,
+  getWorkoutExercises,
+  updateWorkout,
 } from "../utils/database";
 
 interface Exercise {
@@ -32,10 +35,37 @@ interface WorkoutExercise {
 
 function CreateWorkout() {
   const router = useRouter();
-  const [workoutName, setWorkoutName] = useState("");
+  const params = useLocalSearchParams();
+  const isEditing = Boolean(params.id);
+
+  const [workoutName, setWorkoutName] = useState(params.name?.toString() || "");
   const [exercises, setExercises] = useState<WorkoutExercise[]>([]);
   const [showExerciseModal, setShowExerciseModal] = useState(false);
   const [availableExercises, setAvailableExercises] = useState<Exercise[]>([]);
+
+  // Load existing workout data if editing
+  useEffect(() => {
+    if (isEditing) {
+      const loadWorkoutExercises = async () => {
+        try {
+          const workoutExercises = await getWorkoutExercises(params.name as string);
+          setExercises(
+            workoutExercises.map((exercise: any) => ({
+              id: exercise.id,
+              name: exercise.exercise_name,
+              sets: exercise.sets_per_exercise,
+              singleArm: Boolean(exercise.single_arm),
+            }))
+          );
+        } catch (error) {
+          console.error("Error loading workout exercises:", error);
+          Alert.alert("Error", "Failed to load workout exercises");
+        }
+      };
+
+      loadWorkoutExercises();
+    }
+  }, [isEditing, params.name]);
 
   // Load available exercises when modal opens
   const handleOpenExerciseModal = async () => {
@@ -81,23 +111,41 @@ function CreateWorkout() {
     if (!workoutName.trim()) return;
 
     try {
-      const workoutId = await addWorkout(workoutName);
-      await createWorkoutTable(workoutName);
-
-      // Add exercises to the workout
-      for (const exercise of exercises) {
-        await addExerciseToWorkout(
+      if (isEditing) {
+        // Update existing workout
+        await updateWorkout(
+          Number(params.id),
+          params.name as string,
           workoutName,
-          exercise.id,
-          exercise.sets,
-          exercise.singleArm
+          exercises.map(e => ({
+            id: e.id,
+            sets: e.sets,
+            singleArm: e.singleArm,
+          }))
         );
+      } else {
+        // Create new workout
+        const workoutId = await addWorkout(workoutName);
+        await createWorkoutTable(workoutName);
+
+        // Add exercises to the workout
+        for (const exercise of exercises) {
+          await addExerciseToWorkout(
+            workoutName,
+            exercise.id,
+            exercise.sets,
+            exercise.singleArm
+          );
+        }
       }
 
-      // Navigate back to the select screen
       router.back();
     } catch (error) {
       console.error("Error saving workout:", error);
+      Alert.alert(
+        "Error",
+        `Failed to ${isEditing ? "update" : "create"} workout`
+      );
     }
   };
 
@@ -111,7 +159,9 @@ function CreateWorkout() {
         >
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
-        <Text style={styles.title}>Create Workout</Text>
+        <Text style={styles.title}>
+          {isEditing ? "Edit Workout" : "Create Workout"}
+        </Text>
         <TouchableOpacity style={styles.saveButton} onPress={handleSaveWorkout}>
           <Text style={styles.saveButtonText}>Save</Text>
         </TouchableOpacity>
@@ -119,7 +169,6 @@ function CreateWorkout() {
 
       {/* Workout Name Input */}
       <View style={styles.workoutNameContainer}>
-        <Text style={styles.workoutNameLabel}>Workout Name</Text>
         <TextInput
           style={styles.workoutNameInput}
           value={workoutName}
