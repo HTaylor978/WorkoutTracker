@@ -1,7 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
+import { useEffect } from "react";
+import { getWorkoutLogs } from "../utils/database";
 
 export default function TabsLayout() {
+  // Check for workout logs when tabs are mounted
+  useEffect(() => {
+    const checkLogs = async () => {
+      try {
+        const logs = await getWorkoutLogs();
+        console.log("Initial workout logs check:", logs);
+      } catch (error) {
+        console.error("Error checking workout logs:", error);
+      }
+    };
+
+    checkLogs();
+  }, []);
+
   return (
     <Tabs
       screenOptions={{

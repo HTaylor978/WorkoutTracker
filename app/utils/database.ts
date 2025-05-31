@@ -12,6 +12,33 @@ interface DbRow {
   [key: string]: any;
 }
 
+interface DbExercise {
+  id: number;
+  exercise_name: string;
+}
+
+interface DbWorkout {
+  id: number;
+  workout_name: string;
+}
+
+interface DbMuscle {
+  id: number;
+  muscle_name: string;
+}
+
+interface PreviousWorkoutRow {
+  log_id: number;
+  date: string;
+  exercise_id: number;
+  exercise_log_id: number;
+  set_number: number;
+  weight: number;
+  reps: number | null;
+  reps_left: number | null;
+  reps_right: number | null;
+}
+
 // Preset exercises with their associated muscle groups
 const presetExercises: Exercise[] = [
   {
@@ -48,164 +75,153 @@ const presetExercises: Exercise[] = [
   },
 ];
 
-export const initDatabase = async () => {
-  if (!db) {
-    db = await SQLite.openDatabaseAsync("workoutTracker.db");
-
-    // Create Workouts table
-    await db.execAsync(
-      `CREATE TABLE IF NOT EXISTS Workouts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        workout_name TEXT NOT NULL
-      );`
-    );
-
-    // Create Exercises table
-    await db.execAsync(
-      `CREATE TABLE IF NOT EXISTS Exercises (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        exercise_name TEXT NOT NULL UNIQUE
-      );`
-    );
-
-    // Create Muscles table
-    await db.execAsync(
-      `CREATE TABLE IF NOT EXISTS Muscles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        muscle_name TEXT NOT NULL UNIQUE
-      );`
-    );
-
-    // Create Exercise_Muscles join table
-    await db.execAsync(
-      `CREATE TABLE IF NOT EXISTS Exercise_Muscles (
-        exercise_id INTEGER,
-        muscle_id INTEGER,
-        PRIMARY KEY (exercise_id, muscle_id),
-        FOREIGN KEY (exercise_id) REFERENCES Exercises(id),
-        FOREIGN KEY (muscle_id) REFERENCES Muscles(id)
-      );`
-    );
-
-    // Create Workout_Logs table
-    await db.execAsync(
-      `CREATE TABLE IF NOT EXISTS Workout_Logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        workout_id INTEGER,
-        date TEXT,
-        FOREIGN KEY (workout_id) REFERENCES Workouts(id)
-      );`
-    );
-
-    // Create Exercise_Logs table
-    await db.execAsync(
-      `CREATE TABLE IF NOT EXISTS Exercise_Logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        workout_log_id INTEGER,
-        exercise_id INTEGER,
-        single_arm BOOLEAN,
-        FOREIGN KEY (workout_log_id) REFERENCES Workout_Logs(id),
-        FOREIGN KEY (exercise_id) REFERENCES Exercises(id)
-      );`
-    );
-
-    // Create Set_Logs table
-    await db.execAsync(
-      `CREATE TABLE IF NOT EXISTS Set_Logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        exercise_log_id INTEGER,
-        set_number INTEGER,
-        reps_left INTEGER,
-        reps_right INTEGER,
-        reps INTEGER,
-        weight REAL,
-        FOREIGN KEY (exercise_log_id) REFERENCES Exercise_Logs(id)
-      );`
-    );
-
-    // Load preset data
-    await loadPresetData();
-  }
-  return db;
-};
-
 const loadPresetData = async () => {
   const database = await getDb();
 
-  // Helper function to add a muscle if it doesn't exist
-  const addMuscleIfNotExists = async (muscleName: string) => {
-    try {
-      const existingMuscle = await database.getFirstAsync<DbRow>(
-        "SELECT id FROM Muscles WHERE muscle_name = ?;",
-        [muscleName]
+  try {
+    // Check if we already have exercises
+    const existingExercises = await database.getAllAsync(
+      "SELECT * FROM Exercises;"
+    );
+
+    if (existingExercises.length > 0) {
+      console.log("Exercises already exist, skipping preset data");
+      return;
+    }
+
+    // Add preset exercises and their muscles
+    for (const exercise of presetExercises) {
+      // Add exercise
+      const result = await database.runAsync(
+        "INSERT INTO Exercises (exercise_name) VALUES (?);",
+        [exercise.name]
       );
-      if (!existingMuscle) {
-        const result = await database.runAsync(
-          "INSERT INTO Muscles (muscle_name) VALUES (?);",
+      const exerciseId = result.lastInsertRowId;
+
+      // Add muscles and create exercise-muscle relationships
+      for (const muscleName of exercise.muscles) {
+        // Add muscle if it doesn't exist
+        let muscleResult = await database.getFirstAsync<DbMuscle>(
+          "SELECT id FROM Muscles WHERE muscle_name = ?;",
           [muscleName]
         );
-        return result.lastInsertRowId;
-      }
-      return existingMuscle.id;
-    } catch (error) {
-      console.error(`Error adding muscle ${muscleName}:`, error);
-      throw error;
-    }
-  };
 
-  // Helper function to add an exercise if it doesn't exist
-  const addExerciseIfNotExists = async (exerciseName: string) => {
-    try {
-      const existingExercise = await database.getFirstAsync<DbRow>(
-        "SELECT id FROM Exercises WHERE exercise_name = ?;",
-        [exerciseName]
-      );
-      if (!existingExercise) {
-        const result = await database.runAsync(
-          "INSERT INTO Exercises (exercise_name) VALUES (?);",
-          [exerciseName]
-        );
-        return result.lastInsertRowId;
-      }
-      return existingExercise.id;
-    } catch (error) {
-      console.error(`Error adding exercise ${exerciseName}:`, error);
-      throw error;
-    }
-  };
+        let muscleId;
+        if (!muscleResult) {
+          const insertResult = await database.runAsync(
+            "INSERT INTO Muscles (muscle_name) VALUES (?);",
+            [muscleName]
+          );
+          muscleId = insertResult.lastInsertRowId;
+        } else {
+          muscleId = muscleResult.id;
+        }
 
-  // Add all preset exercises and their muscle associations
-  for (const exercise of presetExercises) {
-    try {
-      const exerciseId = await addExerciseIfNotExists(exercise.name);
-
-      for (const muscleName of exercise.muscles) {
-        const muscleId = await addMuscleIfNotExists(muscleName);
-
-        // Link exercise with muscle if not already linked
-        const existingLink = await database.getFirstAsync(
-          "SELECT 1 FROM Exercise_Muscles WHERE exercise_id = ? AND muscle_id = ?;",
+        // Create exercise-muscle relationship
+        await database.runAsync(
+          "INSERT INTO Exercise_Muscles (exercise_id, muscle_id) VALUES (?, ?);",
           [exerciseId, muscleId]
         );
-
-        if (!existingLink) {
-          await database.runAsync(
-            "INSERT INTO Exercise_Muscles (exercise_id, muscle_id) VALUES (?, ?);",
-            [exerciseId, muscleId]
-          );
-        }
       }
+    }
+  } catch (error) {
+    console.error("Error in loadPresetData:", error);
+    throw error;
+  }
+};
+
+export const initDatabase = async () => {
+  if (!db) {
+    console.log("Opening database...");
+    db = await SQLite.openDatabaseAsync("workoutTracker.db");
+    console.log("Database opened");
+
+    try {
+      // Create tables
+      console.log("Creating tables...");
+      await db.execAsync(
+        `CREATE TABLE IF NOT EXISTS Workouts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workout_name TEXT NOT NULL
+        );`
+      );
+
+      await db.execAsync(
+        `CREATE TABLE IF NOT EXISTS Exercises (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          exercise_name TEXT NOT NULL UNIQUE
+        );`
+      );
+
+      await db.execAsync(
+        `CREATE TABLE IF NOT EXISTS Muscles (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          muscle_name TEXT NOT NULL UNIQUE
+        );`
+      );
+
+      await db.execAsync(
+        `CREATE TABLE IF NOT EXISTS Exercise_Muscles (
+          exercise_id INTEGER,
+          muscle_id INTEGER,
+          PRIMARY KEY (exercise_id, muscle_id),
+          FOREIGN KEY (exercise_id) REFERENCES Exercises(id),
+          FOREIGN KEY (muscle_id) REFERENCES Muscles(id)
+        );`
+      );
+
+      await db.execAsync(
+        `CREATE TABLE IF NOT EXISTS Workout_Logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workout_id INTEGER,
+          date TEXT,
+          FOREIGN KEY (workout_id) REFERENCES Workouts(id)
+        );`
+      );
+
+      await db.execAsync(
+        `CREATE TABLE IF NOT EXISTS Exercise_Logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workout_log_id INTEGER,
+          exercise_id INTEGER,
+          single_arm BOOLEAN,
+          FOREIGN KEY (workout_log_id) REFERENCES Workout_Logs(id),
+          FOREIGN KEY (exercise_id) REFERENCES Exercises(id)
+        );`
+      );
+
+      await db.execAsync(
+        `CREATE TABLE IF NOT EXISTS Set_Logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          exercise_log_id INTEGER,
+          set_number INTEGER,
+          reps_left INTEGER,
+          reps_right INTEGER,
+          reps INTEGER,
+          weight REAL,
+          FOREIGN KEY (exercise_log_id) REFERENCES Exercise_Logs(id)
+        );`
+      );
+
+      console.log("Tables created successfully");
+
+      // Load preset exercises
+      console.log("Loading preset exercises...");
+      await loadPresetData();
+      console.log("Preset exercises loaded");
     } catch (error) {
-      console.error(`Error processing exercise ${exercise.name}:`, error);
+      console.error("Error during database initialization:", error);
+      throw error;
     }
   }
+  return db;
 };
 
 const getDb = async () => {
   if (!db) {
     db = await initDatabase();
   }
-  return db;
+  return db!;
 };
 
 // Function to create a new workout table
@@ -447,6 +463,19 @@ export const saveWorkoutLog = async (
 export const getWorkoutLogs = async () => {
   const database = await getDb();
   try {
+    console.log("Executing getWorkoutLogs query...");
+
+    // First, check if we have any workouts
+    const workouts = await database.getAllAsync("SELECT * FROM Workouts;");
+    console.log("Total workouts in database:", workouts.length);
+
+    // Then check workout logs
+    const workoutLogs = await database.getAllAsync(
+      "SELECT * FROM Workout_Logs;"
+    );
+    console.log("Total workout logs in database:", workoutLogs.length);
+
+    // Now get the full workout log data
     const logs = await database.getAllAsync(`
       SELECT 
         wl.id as log_id,
@@ -457,6 +486,7 @@ export const getWorkoutLogs = async () => {
       JOIN Workouts w ON w.id = wl.workout_id
       ORDER BY wl.date DESC;
     `);
+    console.log("Retrieved logs with workout details:", logs);
     return logs;
   } catch (error) {
     console.error("Error getting workout logs:", error);
@@ -617,6 +647,138 @@ export const updateWorkoutLog = async (
     }
   } catch (error) {
     console.error("Error updating workout log:", error);
+    throw error;
+  }
+};
+
+// Delete a workout log and all associated data
+export const deleteWorkoutLog = async (logId: number) => {
+  const database = await getDb();
+  try {
+    // Get all exercise logs to delete their sets
+    const exerciseLogs = await database.getAllAsync<{ id: number }>(
+      "SELECT id FROM Exercise_Logs WHERE workout_log_id = ?;",
+      [logId]
+    );
+
+    // Delete all sets for each exercise log
+    for (const exerciseLog of exerciseLogs) {
+      await database.runAsync(
+        "DELETE FROM Set_Logs WHERE exercise_log_id = ?;",
+        [exerciseLog.id]
+      );
+    }
+
+    // Delete all exercise logs for this workout
+    await database.runAsync(
+      "DELETE FROM Exercise_Logs WHERE workout_log_id = ?;",
+      [logId]
+    );
+
+    // Delete the workout log
+    await database.runAsync("DELETE FROM Workout_Logs WHERE id = ?;", [logId]);
+
+    return true;
+  } catch (error) {
+    console.error("Error deleting workout log:", error);
+    throw error;
+  }
+};
+
+// Get the previous workout data for comparison
+export const getPreviousWorkoutData = async (
+  workoutId: number,
+  workoutName: string,
+  currentDate: string
+) => {
+  const database = await getDb();
+  try {
+    // Get the most recent workout log before the current date
+    const previousWorkout = await database.getAllAsync<PreviousWorkoutRow>(
+      `
+      SELECT 
+        wl.id as log_id,
+        wl.date,
+        el.exercise_id,
+        el.id as exercise_log_id,
+        sl.set_number,
+        sl.weight,
+        sl.reps,
+        sl.reps_left,
+        sl.reps_right
+      FROM Workout_Logs wl
+      JOIN Exercise_Logs el ON el.workout_log_id = wl.id
+      JOIN Set_Logs sl ON sl.exercise_log_id = el.id
+      WHERE wl.workout_id = ? 
+      AND wl.date < ?
+      ORDER BY wl.date DESC;
+    `,
+      [workoutId, currentDate]
+    );
+
+    // If no previous workout exists, get all exercises for this workout and create zero-value data
+    if (previousWorkout.length === 0) {
+      const workoutExercises = await database.getAllAsync<{
+        id: number;
+        single_arm: number;
+      }>(`
+        SELECT e.id, w.single_arm
+        FROM Workout_${workoutName.replace(/\s+/g, "_")} w
+        JOIN Exercises e ON e.id = w.exercise_id
+      `);
+
+      const defaultData: {
+        [key: number]: Array<{
+          weight: number;
+          reps?: number;
+          repsLeft?: number;
+          repsRight?: number;
+          setNumber: number;
+        }>;
+      } = {};
+
+      for (const exercise of workoutExercises) {
+        defaultData[exercise.id] = Array(3)
+          .fill(null)
+          .map((_, index) => ({
+            weight: 0,
+            ...(exercise.single_arm === 1
+              ? { repsLeft: 0, repsRight: 0 }
+              : { reps: 0 }),
+            setNumber: index + 1,
+          }));
+      }
+
+      return defaultData;
+    }
+
+    // Group the data by exercise
+    const exerciseData: {
+      [key: number]: Array<{
+        weight: number;
+        reps?: number;
+        repsLeft?: number;
+        repsRight?: number;
+        setNumber: number;
+      }>;
+    } = {};
+
+    for (const row of previousWorkout) {
+      if (!exerciseData[row.exercise_id]) {
+        exerciseData[row.exercise_id] = [];
+      }
+      exerciseData[row.exercise_id].push({
+        weight: row.weight,
+        reps: row.reps ?? undefined,
+        repsLeft: row.reps_left ?? undefined,
+        repsRight: row.reps_right ?? undefined,
+        setNumber: row.set_number,
+      });
+    }
+
+    return exerciseData;
+  } catch (error) {
+    console.error("Error getting previous workout data:", error);
     throw error;
   }
 };

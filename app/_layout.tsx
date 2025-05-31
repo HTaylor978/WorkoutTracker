@@ -7,6 +7,7 @@ export default function RootLayout() {
   useEffect(() => {
     const init = async () => {
       try {
+        console.log("Starting database initialization...");
         await initDatabase();
         console.log("Database initialized successfully");
       } catch (error) {

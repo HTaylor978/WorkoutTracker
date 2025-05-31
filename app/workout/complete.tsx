@@ -11,6 +11,7 @@ import {
   PanResponderGestureState,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -18,6 +19,7 @@ import {
 } from "react-native";
 import {
   getExercises,
+  getPreviousWorkoutData,
   getWorkoutExercises,
   getWorkoutLogDetails,
   saveWorkoutLog,
@@ -49,6 +51,12 @@ interface SetTileProps {
   exerciseIndex: number;
   set: ExerciseSet;
   setIndex: number;
+  previousSetData?: {
+    weight: number;
+    reps?: number;
+    repsLeft?: number;
+    repsRight?: number;
+  };
   handleUpdateSet: (
     exerciseIndex: number,
     setIndex: number,
@@ -58,24 +66,110 @@ interface SetTileProps {
   handleRemoveSet: (exerciseIndex: number, setIndex: number) => void;
 }
 
+const getProgressionColor = (
+  currentSet: ExerciseSet,
+  previousSet?: {
+    weight: number;
+    reps?: number;
+    repsLeft?: number;
+    repsRight?: number;
+  }
+): string => {
+  if (!previousSet || !currentSet.weight) return "transparent";
+
+  const currentWeight = parseFloat(currentSet.weight) || 0;
+  const previousWeight = previousSet.weight;
+
+  // For single-arm exercises
+  if (currentSet.repsLeft !== undefined && currentSet.repsRight !== undefined) {
+    const currentLeftReps = parseInt(currentSet.repsLeft) || 0;
+    const currentRightReps = parseInt(currentSet.repsRight) || 0;
+    const previousLeftReps = previousSet.repsLeft || 0;
+    const previousRightReps = previousSet.repsRight || 0;
+
+    // Only compare if user has entered both reps
+    if (!currentSet.repsLeft || !currentSet.repsRight) return "transparent";
+
+    // Progress: Weight increase or both arms have more reps
+    if (
+      currentWeight > previousWeight ||
+      (currentLeftReps > previousLeftReps &&
+        currentRightReps > previousRightReps)
+    ) {
+      return "rgba(0, 122, 255, 0.5)"; // Blue
+    }
+
+    // Maintained: Same weight and reps
+    if (
+      currentWeight === previousWeight &&
+      currentLeftReps === previousLeftReps &&
+      currentRightReps === previousRightReps
+    ) {
+      return "rgba(52, 199, 89, 0.5)"; // Green
+    }
+
+    // Small loss: One rep less on either arm
+    if (
+      currentWeight === previousWeight &&
+      Math.abs(currentLeftReps - previousLeftReps) <= 1 &&
+      Math.abs(currentRightReps - previousRightReps) <= 1
+    ) {
+      return "rgba(255, 204, 0, 0.5)"; // Yellow
+    }
+
+    // Large loss: Weight decrease or 2+ reps less
+    return "rgba(255, 59, 48, 0.5)"; // Red
+  }
+
+  // For regular exercises
+  const currentReps = parseInt(currentSet.reps || "0");
+  const previousReps = previousSet.reps || 0;
+
+  // Only compare if user has entered reps
+  if (!currentSet.reps) return "transparent";
+
+  // Progress: Weight increase or more reps
+  if (currentWeight > previousWeight || currentReps > previousReps) {
+    return "rgba(0, 122, 255, 0.5)"; // Blue
+  }
+
+  // Maintained: Same weight and reps
+  if (currentWeight === previousWeight && currentReps === previousReps) {
+    return "rgba(52, 199, 89, 0.5)"; // Green
+  }
+
+  // Small loss: One rep less
+  if (currentWeight === previousWeight && previousReps - currentReps === 1) {
+    return "rgba(255, 204, 0, 0.5)"; // Yellow
+  }
+
+  // Large loss: Weight decrease or 2+ reps less
+  return "rgba(255, 59, 48, 0.5)"; // Red
+};
+
 const SetTile: React.FC<SetTileProps> = ({
   exercise,
   exerciseIndex,
   set,
   setIndex,
+  previousSetData,
   handleUpdateSet,
   handleRemoveSet,
 }) => {
+  const backgroundColor = getProgressionColor(set, previousSetData);
+
   const renderInput = (
     value: string | undefined,
     onChangeText: (value: string) => void,
-    label: string
+    label: string,
+    placeholder?: string
   ) => (
     <View style={styles.inputContainer}>
       <TextInput
         style={styles.input}
         keyboardType="numeric"
-        placeholder="0"
+        placeholder={placeholder || "0"}
+        placeholderTextColor="#999"
         value={value || ""}
         onChangeText={onChangeText}
       />
@@ -84,7 +178,7 @@ const SetTile: React.FC<SetTileProps> = ({
   );
 
   return (
-    <View style={styles.setTileContainer}>
+    <View style={[styles.setTileContainer, { backgroundColor }]}>
       <View style={styles.setTileContent}>
         <View style={styles.setNumber}>
           <Text style={styles.setNumberText}>Set {setIndex + 1}</Text>
@@ -93,7 +187,8 @@ const SetTile: React.FC<SetTileProps> = ({
         {renderInput(
           set.weight,
           (value) => handleUpdateSet(exerciseIndex, setIndex, "weight", value),
-          "kg"
+          "kg",
+          previousSetData ? previousSetData.weight.toString() : "0"
         )}
 
         {exercise.singleArm ? (
@@ -102,20 +197,23 @@ const SetTile: React.FC<SetTileProps> = ({
               set.repsLeft,
               (value) =>
                 handleUpdateSet(exerciseIndex, setIndex, "repsLeft", value),
-              "L"
+              "L",
+              previousSetData?.repsLeft?.toString()
             )}
             {renderInput(
               set.repsRight,
               (value) =>
                 handleUpdateSet(exerciseIndex, setIndex, "repsRight", value),
-              "R"
+              "R",
+              previousSetData?.repsRight?.toString()
             )}
           </View>
         ) : (
           renderInput(
             set.reps,
             (value) => handleUpdateSet(exerciseIndex, setIndex, "reps", value),
-            "reps"
+            "reps",
+            previousSetData?.reps?.toString()
           )
         )}
       </View>
@@ -130,7 +228,7 @@ interface SetRowItem {
 
 const TILE_WIDTH = 300; // Adjust this value based on your needs
 
-const ExerciseRow: React.FC<{
+interface ExerciseRowProps {
   exercise: WorkoutExercise;
   exerciseIndex: number;
   handleUpdateSet: (
@@ -142,19 +240,31 @@ const ExerciseRow: React.FC<{
   handleRemoveSet: (exerciseIndex: number, setIndex: number) => void;
   handleAddSet: (exerciseIndex: number) => void;
   handleRemoveExercise: (exerciseIndex: number, name: string) => void;
+  handleToggleSingleArm: (exerciseIndex: number) => void;
   openSetIndex: { exerciseIndex: number; setIndex: number } | null;
   setOpenSetIndex: (
     value: { exerciseIndex: number; setIndex: number } | null
   ) => void;
-}> = ({
+  previousWorkoutData?: Array<{
+    weight: number;
+    reps?: number;
+    repsLeft?: number;
+    repsRight?: number;
+    setNumber: number;
+  }>;
+}
+
+const ExerciseRow: React.FC<ExerciseRowProps> = ({
   exercise,
   exerciseIndex,
   handleUpdateSet,
   handleRemoveSet,
   handleAddSet,
   handleRemoveExercise,
+  handleToggleSingleArm,
   openSetIndex,
   setOpenSetIndex,
+  previousWorkoutData,
 }) => {
   const setListRefs = useRef<{ [key: string]: FlatList | null }>({});
   const [fullyOpenSet, setFullyOpenSet] = useState<{ setIndex: number } | null>(
@@ -208,6 +318,11 @@ const ExerciseRow: React.FC<{
     const isOpen =
       openSetIndex?.exerciseIndex === exerciseIndex &&
       openSetIndex?.setIndex === setIndex;
+
+    const previousSetData = previousWorkoutData?.find(
+      (prevSet) => prevSet.setNumber === setIndex + 1
+    );
+
     const rowItems: SetRowItem[] = [
       {
         type: "set",
@@ -217,6 +332,7 @@ const ExerciseRow: React.FC<{
             exerciseIndex={exerciseIndex}
             set={set}
             setIndex={setIndex}
+            previousSetData={previousSetData}
             handleUpdateSet={handleUpdateSet}
             handleRemoveSet={handleRemoveSet}
           />
@@ -270,12 +386,23 @@ const ExerciseRow: React.FC<{
       <View style={styles.exerciseHeader}>
         <View style={styles.exerciseNameContainer}>
           <Text style={styles.exerciseName}>{exercise.name}</Text>
-          <TouchableOpacity
-            onPress={() => handleRemoveExercise(exerciseIndex, exercise.name)}
-            style={styles.deleteButton}
-          >
-            <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-          </TouchableOpacity>
+          <View style={styles.exerciseControls}>
+            <View style={styles.singleArmToggle}>
+              <Text style={styles.singleArmLabel}>Single Arm</Text>
+              <Switch
+                value={exercise.singleArm}
+                onValueChange={() => handleToggleSingleArm(exerciseIndex)}
+                trackColor={{ false: "#767577", true: "#81b0ff" }}
+                thumbColor={exercise.singleArm ? "#007AFF" : "#f4f3f4"}
+              />
+            </View>
+            <TouchableOpacity
+              onPress={() => handleRemoveExercise(exerciseIndex, exercise.name)}
+              style={styles.deleteButton}
+            >
+              <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -318,6 +445,7 @@ interface WorkoutLog {
   log_id: number;
   workout_id: number;
   workout_name: string;
+  date: string;
   exercises: WorkoutLogExercise[];
 }
 
@@ -339,6 +467,15 @@ function CompleteWorkout() {
     params.logId ? parseInt(params.logId as string) : 0
   );
   const [exercises, setExercises] = useState<WorkoutExercise[]>([]);
+  const [previousWorkoutData, setPreviousWorkoutData] = useState<{
+    [key: number]: Array<{
+      weight: number;
+      reps?: number;
+      repsLeft?: number;
+      repsRight?: number;
+      setNumber: number;
+    }>;
+  }>({});
   const [showExerciseModal, setShowExerciseModal] = useState(false);
   const [availableExercises, setAvailableExercises] = useState<Exercise[]>([]);
   const [gestureType, setGestureType] = useState<
@@ -359,6 +496,14 @@ function CompleteWorkout() {
           const workoutLog = (await getWorkoutLogDetails(logId)) as WorkoutLog;
           setWorkoutId(workoutLog.workout_id);
           setWorkoutName(workoutLog.workout_name);
+
+          // Get previous workout data
+          const previousData = await getPreviousWorkoutData(
+            workoutLog.workout_id,
+            workoutLog.workout_name,
+            workoutLog.date
+          );
+          setPreviousWorkoutData(previousData);
 
           // Transform the exercises data to match our state structure
           const transformedExercises: WorkoutExercise[] =
@@ -384,6 +529,15 @@ function CompleteWorkout() {
           const workoutExercises = (await getWorkoutExercises(
             workoutName
           )) as WorkoutTemplateExercise[];
+
+          // Get previous workout data
+          const previousData = await getPreviousWorkoutData(
+            workoutId,
+            workoutName,
+            new Date().toISOString()
+          );
+          setPreviousWorkoutData(previousData);
+
           const exercisesWithSetData: WorkoutExercise[] = workoutExercises.map(
             (exercise) => ({
               id: exercise.id,
@@ -407,7 +561,7 @@ function CompleteWorkout() {
     };
 
     loadWorkoutData();
-  }, [workoutName, logId]);
+  }, [workoutName, logId, workoutId]);
 
   const handleOpenExerciseModal = async () => {
     try {
@@ -503,6 +657,37 @@ function CompleteWorkout() {
     setExercises(updatedExercises);
   };
 
+  const handleToggleSingleArm = (exerciseIndex: number) => {
+    const updatedExercises = [...exercises];
+    const exercise = updatedExercises[exerciseIndex];
+    exercise.singleArm = !exercise.singleArm;
+
+    // Convert the set data
+    exercise.setData = exercise.setData.map((set) => {
+      if (exercise.singleArm) {
+        // Converting from regular to single arm
+        return {
+          weight: set.weight,
+          repsLeft: set.reps,
+          repsRight: set.reps,
+        };
+      } else {
+        // Converting from single arm to regular
+        // Use the higher of left/right reps if they differ
+        const reps = Math.max(
+          parseInt(set.repsLeft || "0"),
+          parseInt(set.repsRight || "0")
+        ).toString();
+        return {
+          weight: set.weight,
+          reps,
+        };
+      }
+    });
+
+    setExercises(updatedExercises);
+  };
+
   const handleFinishWorkout = async () => {
     try {
       // Transform exercises data for saving
@@ -578,8 +763,10 @@ function CompleteWorkout() {
       handleRemoveSet={handleRemoveSet}
       handleAddSet={handleAddSet}
       handleRemoveExercise={handleRemoveExercise}
+      handleToggleSingleArm={handleToggleSingleArm}
       openSetIndex={openSetIndex}
       setOpenSetIndex={setOpenSetIndex}
+      previousWorkoutData={previousWorkoutData[exercise.id]}
     />
   );
 
@@ -628,8 +815,10 @@ function CompleteWorkout() {
             handleRemoveSet={handleRemoveSet}
             handleAddSet={handleAddSet}
             handleRemoveExercise={handleRemoveExercise}
+            handleToggleSingleArm={handleToggleSingleArm}
             openSetIndex={openSetIndex}
             setOpenSetIndex={setOpenSetIndex}
+            previousWorkoutData={previousWorkoutData[exercise.id]}
           />
         ))}
 
@@ -780,6 +969,7 @@ const styles = StyleSheet.create({
     padding: 4,
     textAlign: "center",
     fontSize: 16,
+    color: "#000",
   },
   inputLabel: {
     marginLeft: 4,
@@ -874,6 +1064,22 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 12,
+  },
+  exerciseControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    marginTop: 8,
+  },
+  singleArmToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 16,
+  },
+  singleArmLabel: {
+    fontSize: 14,
+    color: "#666",
+    marginRight: 8,
   },
 });
 
