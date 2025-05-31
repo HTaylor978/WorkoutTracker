@@ -176,21 +176,21 @@ const ExerciseRow: React.FC<{
       },
     ];
 
-    const renderRowItem: ListRenderItem<SetRowItem> = ({ item }) =>
-      item.content;
-
     return (
       <View style={styles.setItemContainer}>
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
           data={rowItems}
-          renderItem={renderRowItem}
+          renderItem={({ item }) => item.content}
           keyExtractor={(item) => item.type}
           snapToAlignment="start"
           decelerationRate="fast"
           snapToInterval={TILE_WIDTH}
           pagingEnabled
+          scrollEnabled={true}
+          initialNumToRender={2}
+          maxToRenderPerBatch={2}
         />
       </View>
     );
@@ -213,8 +213,13 @@ const ExerciseRow: React.FC<{
       <FlatList
         data={exercise.setData}
         renderItem={renderSetItem}
-        keyExtractor={(_, index) => index.toString()}
+        keyExtractor={(_, index) => `set-${exerciseIndex}-${index}`}
         style={styles.setsContainer}
+        scrollEnabled={false}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        removeClippedSubviews={false}
+        windowSize={10}
       />
 
       <TouchableOpacity
@@ -570,14 +575,16 @@ const styles = StyleSheet.create({
   },
   setsContainer: {
     marginBottom: 12,
+    flexGrow: 0,
   },
   setItemContainer: {
     width: TILE_WIDTH,
     marginBottom: 4,
+    height: 40,
   },
   removeSetButton: {
     width: TILE_WIDTH,
-    height: "100%",
+    height: 40,
     backgroundColor: "#FF3B30",
     justifyContent: "center",
     alignItems: "center",
