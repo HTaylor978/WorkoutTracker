@@ -16,7 +16,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { getExercises, getWorkoutExercises } from "../utils/database";
+import {
+  getExercises,
+  getWorkoutExercises,
+  getWorkoutLogDetails,
+  saveWorkoutLog,
+  updateWorkoutLog,
+} from "../utils/database";
 
 interface ExerciseSet {
   weight: string;
@@ -122,6 +128,8 @@ interface SetRowItem {
   content: React.ReactElement;
 }
 
+const TILE_WIDTH = 300; // Adjust this value based on your needs
+
 const ExerciseRow: React.FC<{
   exercise: WorkoutExercise;
   exerciseIndex: number;
@@ -134,6 +142,10 @@ const ExerciseRow: React.FC<{
   handleRemoveSet: (exerciseIndex: number, setIndex: number) => void;
   handleAddSet: (exerciseIndex: number) => void;
   handleRemoveExercise: (exerciseIndex: number, name: string) => void;
+  openSetIndex: { exerciseIndex: number; setIndex: number } | null;
+  setOpenSetIndex: (
+    value: { exerciseIndex: number; setIndex: number } | null
+  ) => void;
 }> = ({
   exercise,
   exerciseIndex,
@@ -141,7 +153,51 @@ const ExerciseRow: React.FC<{
   handleRemoveSet,
   handleAddSet,
   handleRemoveExercise,
+  openSetIndex,
+  setOpenSetIndex,
 }) => {
+  const setListRefs = useRef<{ [key: string]: FlatList | null }>({});
+  const [fullyOpenSet, setFullyOpenSet] = useState<{ setIndex: number } | null>(
+    null
+  );
+
+  const handleScroll = (event: any, setIndex: number) => {
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const isThisSetOpen =
+      openSetIndex?.exerciseIndex === exerciseIndex &&
+      openSetIndex?.setIndex === setIndex;
+
+    // If this set is starting to open (moved more than 10% of the way)
+    if (offsetX > TILE_WIDTH * 0.1 && !isThisSetOpen) {
+      // If there's a different set fully open, close it immediately
+      if (fullyOpenSet && fullyOpenSet.setIndex !== setIndex) {
+        const listRef =
+          setListRefs.current[`${exerciseIndex}-${fullyOpenSet.setIndex}`];
+        if (listRef) {
+          listRef.scrollToOffset({ offset: 0, animated: true });
+        }
+        setFullyOpenSet(null);
+      }
+    }
+
+    // When fully opened
+    if (offsetX >= TILE_WIDTH) {
+      if (!isThisSetOpen) {
+        setOpenSetIndex({ exerciseIndex, setIndex });
+        setFullyOpenSet({ setIndex });
+      }
+    }
+    // When fully closed
+    else if (offsetX === 0) {
+      if (isThisSetOpen) {
+        setOpenSetIndex(null);
+        if (fullyOpenSet?.setIndex === setIndex) {
+          setFullyOpenSet(null);
+        }
+      }
+    }
+  };
+
   const renderSetItem = ({
     item: set,
     index: setIndex,
@@ -149,6 +205,9 @@ const ExerciseRow: React.FC<{
     item: ExerciseSet;
     index: number;
   }) => {
+    const isOpen =
+      openSetIndex?.exerciseIndex === exerciseIndex &&
+      openSetIndex?.setIndex === setIndex;
     const rowItems: SetRowItem[] = [
       {
         type: "set",
@@ -168,7 +227,11 @@ const ExerciseRow: React.FC<{
         content: (
           <TouchableOpacity
             style={styles.removeSetButton}
-            onPress={() => handleRemoveSet(exerciseIndex, setIndex)}
+            onPress={() => {
+              handleRemoveSet(exerciseIndex, setIndex);
+              setOpenSetIndex(null);
+              setFullyOpenSet(null);
+            }}
           >
             <Text style={styles.removeSetText}>Remove Set</Text>
           </TouchableOpacity>
@@ -179,6 +242,9 @@ const ExerciseRow: React.FC<{
     return (
       <View style={styles.setItemContainer}>
         <FlatList
+          ref={(ref) => {
+            setListRefs.current[`${exerciseIndex}-${setIndex}`] = ref;
+          }}
           horizontal
           showsHorizontalScrollIndicator={false}
           data={rowItems}
@@ -191,6 +257,9 @@ const ExerciseRow: React.FC<{
           scrollEnabled={true}
           initialNumToRender={2}
           maxToRenderPerBatch={2}
+          onScroll={(event) => handleScroll(event, setIndex)}
+          onMomentumScrollEnd={(event) => handleScroll(event, setIndex)}
+          scrollEventThrottle={16}
         />
       </View>
     );
@@ -233,46 +302,112 @@ const ExerciseRow: React.FC<{
   );
 };
 
-const TILE_WIDTH = 300; // Adjust this value based on your needs
+interface WorkoutLogExercise {
+  exercise_id: number;
+  exercise_name: string;
+  single_arm: number;
+  sets: Array<{
+    weight: number;
+    reps_left?: number;
+    reps_right?: number;
+    reps?: number;
+  }>;
+}
+
+interface WorkoutLog {
+  log_id: number;
+  workout_id: number;
+  workout_name: string;
+  exercises: WorkoutLogExercise[];
+}
+
+interface WorkoutTemplateExercise {
+  id: number;
+  exercise_name: string;
+  sets_per_exercise: number;
+  single_arm: number;
+}
 
 function CompleteWorkout() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const [workoutName, setWorkoutName] = useState(params.name as string);
+  const [workoutId, setWorkoutId] = useState(
+    params.workoutId ? parseInt(params.workoutId as string) : 0
+  );
+  const [logId, setLogId] = useState(
+    params.logId ? parseInt(params.logId as string) : 0
+  );
   const [exercises, setExercises] = useState<WorkoutExercise[]>([]);
   const [showExerciseModal, setShowExerciseModal] = useState(false);
   const [availableExercises, setAvailableExercises] = useState<Exercise[]>([]);
   const [gestureType, setGestureType] = useState<
     "horizontal" | "vertical" | null
   >(null);
+  const [openSetIndex, setOpenSetIndex] = useState<{
+    exerciseIndex: number;
+    setIndex: number;
+  } | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const MIN_GESTURE_DISTANCE = 5;
 
   useEffect(() => {
-    const loadWorkoutExercises = async () => {
+    const loadWorkoutData = async () => {
       try {
-        const workoutExercises = await getWorkoutExercises(workoutName);
-        const exercisesWithSetData = workoutExercises.map((exercise: any) => ({
-          id: exercise.id,
-          name: exercise.exercise_name,
-          sets: exercise.sets_per_exercise,
-          singleArm: Boolean(exercise.single_arm),
-          setData: Array(exercise.sets_per_exercise).fill({
-            weight: "",
-            ...(Boolean(exercise.single_arm)
-              ? { repsLeft: "", repsRight: "" }
-              : { reps: "" }),
-          }),
-        }));
-        setExercises(exercisesWithSetData);
+        if (logId) {
+          // Load existing workout log
+          const workoutLog = (await getWorkoutLogDetails(logId)) as WorkoutLog;
+          setWorkoutId(workoutLog.workout_id);
+          setWorkoutName(workoutLog.workout_name);
+
+          // Transform the exercises data to match our state structure
+          const transformedExercises: WorkoutExercise[] =
+            workoutLog.exercises.map((exercise) => ({
+              id: exercise.exercise_id,
+              name: exercise.exercise_name,
+              singleArm: exercise.single_arm === 1,
+              sets: exercise.sets.length,
+              setData: exercise.sets.map((set) => ({
+                weight: set.weight.toString(),
+                ...(exercise.single_arm === 1
+                  ? {
+                      repsLeft: set.reps_left?.toString() || "",
+                      repsRight: set.reps_right?.toString() || "",
+                    }
+                  : { reps: set.reps?.toString() || "" }),
+              })),
+            }));
+
+          setExercises(transformedExercises);
+        } else {
+          // Load new workout template
+          const workoutExercises = (await getWorkoutExercises(
+            workoutName
+          )) as WorkoutTemplateExercise[];
+          const exercisesWithSetData: WorkoutExercise[] = workoutExercises.map(
+            (exercise) => ({
+              id: exercise.id,
+              name: exercise.exercise_name,
+              sets: exercise.sets_per_exercise,
+              singleArm: Boolean(exercise.single_arm),
+              setData: Array(exercise.sets_per_exercise).fill({
+                weight: "",
+                ...(Boolean(exercise.single_arm)
+                  ? { repsLeft: "", repsRight: "" }
+                  : { reps: "" }),
+              }),
+            })
+          );
+          setExercises(exercisesWithSetData);
+        }
       } catch (error) {
-        console.error("Error loading workout exercises:", error);
-        Alert.alert("Error", "Failed to load workout exercises");
+        console.error("Error loading workout data:", error);
+        Alert.alert("Error", "Failed to load workout data");
       }
     };
 
-    loadWorkoutExercises();
-  }, [workoutName]);
+    loadWorkoutData();
+  }, [workoutName, logId]);
 
   const handleOpenExerciseModal = async () => {
     try {
@@ -318,7 +453,14 @@ function CompleteWorkout() {
     const exercise = updatedExercises[exerciseIndex];
     exercise.setData.splice(setIndex, 1);
     exercise.sets -= 1;
+
+    // If no sets left, remove the exercise
+    if (exercise.sets === 0) {
+      updatedExercises.splice(exerciseIndex, 1);
+    }
+
     setExercises(updatedExercises);
+    setOpenSetIndex(null); // Close the remove button after removing
   };
 
   const handleRemoveExercise = (
@@ -361,10 +503,36 @@ function CompleteWorkout() {
     setExercises(updatedExercises);
   };
 
-  const handleFinishWorkout = () => {
-    // TODO: Save workout data
-    console.log("Workout data:", exercises);
-    router.back();
+  const handleFinishWorkout = async () => {
+    try {
+      // Transform exercises data for saving
+      const exercisesForSaving = exercises.map((exercise) => ({
+        id: exercise.id,
+        singleArm: exercise.singleArm,
+        sets: exercise.setData.map((set) => ({
+          weight: parseFloat(set.weight) || 0,
+          ...(exercise.singleArm
+            ? {
+                repsLeft: parseInt(set.repsLeft || "0"),
+                repsRight: parseInt(set.repsRight || "0"),
+              }
+            : { reps: parseInt(set.reps || "0") }),
+        })),
+      }));
+
+      if (logId) {
+        // Update existing workout log
+        await updateWorkoutLog(logId, exercisesForSaving);
+      } else {
+        // Save new workout log
+        await saveWorkoutLog(workoutId, exercisesForSaving);
+      }
+
+      router.replace("/(tabs)");
+    } catch (error) {
+      console.error("Error saving workout:", error);
+      Alert.alert("Error", "Failed to save workout");
+    }
   };
 
   const mainPanResponder = PanResponder.create({
@@ -410,6 +578,8 @@ function CompleteWorkout() {
       handleRemoveSet={handleRemoveSet}
       handleAddSet={handleAddSet}
       handleRemoveExercise={handleRemoveExercise}
+      openSetIndex={openSetIndex}
+      setOpenSetIndex={setOpenSetIndex}
     />
   );
 
@@ -458,6 +628,8 @@ function CompleteWorkout() {
             handleRemoveSet={handleRemoveSet}
             handleAddSet={handleAddSet}
             handleRemoveExercise={handleRemoveExercise}
+            openSetIndex={openSetIndex}
+            setOpenSetIndex={setOpenSetIndex}
           />
         ))}
 

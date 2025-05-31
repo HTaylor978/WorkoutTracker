@@ -87,6 +87,42 @@ export const initDatabase = async () => {
       );`
     );
 
+    // Create Workout_Logs table
+    await db.execAsync(
+      `CREATE TABLE IF NOT EXISTS Workout_Logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workout_id INTEGER,
+        date TEXT,
+        FOREIGN KEY (workout_id) REFERENCES Workouts(id)
+      );`
+    );
+
+    // Create Exercise_Logs table
+    await db.execAsync(
+      `CREATE TABLE IF NOT EXISTS Exercise_Logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workout_log_id INTEGER,
+        exercise_id INTEGER,
+        single_arm BOOLEAN,
+        FOREIGN KEY (workout_log_id) REFERENCES Workout_Logs(id),
+        FOREIGN KEY (exercise_id) REFERENCES Exercises(id)
+      );`
+    );
+
+    // Create Set_Logs table
+    await db.execAsync(
+      `CREATE TABLE IF NOT EXISTS Set_Logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        exercise_log_id INTEGER,
+        set_number INTEGER,
+        reps_left INTEGER,
+        reps_right INTEGER,
+        reps INTEGER,
+        weight REAL,
+        FOREIGN KEY (exercise_log_id) REFERENCES Exercise_Logs(id)
+      );`
+    );
+
     // Load preset data
     await loadPresetData();
   }
@@ -343,5 +379,244 @@ export const updateWorkout = async (
   }
 };
 
-// Export an empty object as default to satisfy Expo Router
-export default {};
+// Save a completed workout
+export const saveWorkoutLog = async (
+  workoutId: number,
+  exercises: Array<{
+    id: number;
+    singleArm: boolean;
+    sets: Array<{
+      weight: number;
+      reps?: number;
+      repsLeft?: number;
+      repsRight?: number;
+    }>;
+  }>
+) => {
+  const database = await getDb();
+
+  try {
+    // Insert workout log and get its ID
+    const workoutLogResult = await database.runAsync(
+      "INSERT INTO Workout_Logs (workout_id, date) VALUES (?, ?);",
+      [workoutId, new Date().toISOString()]
+    );
+    const workoutLogId = workoutLogResult.lastInsertRowId;
+
+    // Insert each exercise and its sets
+    for (const exercise of exercises) {
+      // Insert exercise log
+      const exerciseLogResult = await database.runAsync(
+        "INSERT INTO Exercise_Logs (workout_log_id, exercise_id, single_arm) VALUES (?, ?, ?);",
+        [workoutLogId, exercise.id, exercise.singleArm ? 1 : 0]
+      );
+      const exerciseLogId = exerciseLogResult.lastInsertRowId;
+
+      // Insert sets for this exercise
+      for (let i = 0; i < exercise.sets.length; i++) {
+        const set = exercise.sets[i];
+        await database.runAsync(
+          `INSERT INTO Set_Logs (
+            exercise_log_id, 
+            set_number, 
+            reps_left, 
+            reps_right, 
+            reps, 
+            weight
+          ) VALUES (?, ?, ?, ?, ?, ?);`,
+          [
+            exerciseLogId,
+            i + 1,
+            set.repsLeft || null,
+            set.repsRight || null,
+            set.reps || null,
+            set.weight,
+          ]
+        );
+      }
+    }
+
+    return workoutLogId;
+  } catch (error) {
+    console.error("Error saving workout log:", error);
+    throw error;
+  }
+};
+
+// Get all workout logs
+export const getWorkoutLogs = async () => {
+  const database = await getDb();
+  try {
+    const logs = await database.getAllAsync(`
+      SELECT 
+        wl.id as log_id,
+        wl.date,
+        w.id as workout_id,
+        w.workout_name
+      FROM Workout_Logs wl
+      JOIN Workouts w ON w.id = wl.workout_id
+      ORDER BY wl.date DESC;
+    `);
+    return logs;
+  } catch (error) {
+    console.error("Error getting workout logs:", error);
+    throw error;
+  }
+};
+
+// Get details of a specific workout log
+export const getWorkoutLogDetails = async (logId: number) => {
+  const database = await getDb();
+  try {
+    // Get workout info
+    const workoutInfo = await database.getFirstAsync<{
+      log_id: number;
+      date: string;
+      workout_id: number;
+      workout_name: string;
+    }>(
+      `
+      SELECT 
+        wl.id as log_id,
+        wl.date,
+        w.id as workout_id,
+        w.workout_name
+      FROM Workout_Logs wl
+      JOIN Workouts w ON w.id = wl.workout_id
+      WHERE wl.id = ?;
+    `,
+      [logId]
+    );
+
+    if (!workoutInfo) {
+      throw new Error(`No workout log found with id ${logId}`);
+    }
+
+    // Get exercises
+    const exercises = await database.getAllAsync<{
+      exercise_log_id: number;
+      exercise_id: number;
+      exercise_name: string;
+      single_arm: number;
+      sets?: Array<{
+        set_number: number;
+        reps_left: number | null;
+        reps_right: number | null;
+        reps: number | null;
+        weight: number;
+      }>;
+    }>(
+      `
+      SELECT 
+        el.id as exercise_log_id,
+        e.id as exercise_id,
+        e.exercise_name,
+        el.single_arm
+      FROM Exercise_Logs el
+      JOIN Exercises e ON e.id = el.exercise_id
+      WHERE el.workout_log_id = ?;
+    `,
+      [logId]
+    );
+
+    // Get sets for each exercise
+    for (const exercise of exercises) {
+      const sets = await database.getAllAsync<{
+        set_number: number;
+        reps_left: number | null;
+        reps_right: number | null;
+        reps: number | null;
+        weight: number;
+      }>(
+        `
+        SELECT set_number, reps_left, reps_right, reps, weight
+        FROM Set_Logs
+        WHERE exercise_log_id = ?
+        ORDER BY set_number;
+      `,
+        [exercise.exercise_log_id]
+      );
+      exercise.sets = sets;
+    }
+
+    return {
+      ...workoutInfo,
+      exercises,
+    };
+  } catch (error) {
+    console.error("Error getting workout log details:", error);
+    throw error;
+  }
+};
+
+// Update an existing workout log
+export const updateWorkoutLog = async (
+  logId: number,
+  exercises: Array<{
+    id: number;
+    singleArm: boolean;
+    sets: Array<{
+      weight: number;
+      reps?: number;
+      repsLeft?: number;
+      repsRight?: number;
+    }>;
+  }>
+) => {
+  const database = await getDb();
+  try {
+    // Get all exercise logs to delete their sets
+    const exerciseLogs = await database.getAllAsync<{ id: number }>(
+      "SELECT id FROM Exercise_Logs WHERE workout_log_id = ?;",
+      [logId]
+    );
+
+    // Delete all sets for each exercise log
+    for (const exerciseLog of exerciseLogs) {
+      await database.runAsync(
+        "DELETE FROM Set_Logs WHERE exercise_log_id = ?;",
+        [exerciseLog.id]
+      );
+    }
+
+    // Delete all exercise logs for this workout
+    await database.runAsync(
+      "DELETE FROM Exercise_Logs WHERE workout_log_id = ?;",
+      [logId]
+    );
+
+    // Insert new exercise logs and sets
+    for (const exercise of exercises) {
+      const exerciseLogResult = await database.runAsync(
+        "INSERT INTO Exercise_Logs (workout_log_id, exercise_id, single_arm) VALUES (?, ?, ?);",
+        [logId, exercise.id, exercise.singleArm ? 1 : 0]
+      );
+      const exerciseLogId = exerciseLogResult.lastInsertRowId;
+
+      for (let i = 0; i < exercise.sets.length; i++) {
+        const set = exercise.sets[i];
+        await database.runAsync(
+          `INSERT INTO Set_Logs (
+            exercise_log_id, 
+            set_number, 
+            reps_left, 
+            reps_right, 
+            reps, 
+            weight
+          ) VALUES (?, ?, ?, ?, ?, ?);`,
+          [
+            exerciseLogId,
+            i + 1,
+            set.repsLeft || null,
+            set.repsRight || null,
+            set.reps || null,
+            set.weight,
+          ]
+        );
+      }
+    }
+  } catch (error) {
+    console.error("Error updating workout log:", error);
+    throw error;
+  }
+};

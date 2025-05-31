@@ -33,7 +33,7 @@ function StartWorkout() {
   const handleStartWorkout = () => {
     router.push({
       pathname: "/workout/complete",
-      params: { id: workoutId, name: workoutName },
+      params: { workoutId: workoutId, name: workoutName },
     });
   };
 
