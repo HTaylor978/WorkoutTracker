@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-  Modal,
+  Alert,
   ScrollView,
   StyleSheet,
   Switch,
@@ -10,13 +10,11 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  Alert,
 } from "react-native";
 import {
   addExerciseToWorkout,
   addWorkout,
   createWorkoutTable,
-  getExercises,
   getWorkoutExercises,
   updateWorkout,
 } from "../utils/database";
@@ -48,7 +46,9 @@ function CreateWorkout() {
     if (isEditing) {
       const loadWorkoutExercises = async () => {
         try {
-          const workoutExercises = await getWorkoutExercises(params.name as string);
+          const workoutExercises = await getWorkoutExercises(
+            params.name as string
+          );
           setExercises(
             workoutExercises.map((exercise: any) => ({
               id: exercise.id,
@@ -67,15 +67,49 @@ function CreateWorkout() {
     }
   }, [isEditing, params.name]);
 
-  // Load available exercises when modal opens
-  const handleOpenExerciseModal = async () => {
-    try {
-      const exerciseList = (await getExercises()) as Exercise[];
-      setAvailableExercises(exerciseList);
-      setShowExerciseModal(true);
-    } catch (error) {
-      console.error("Error loading exercises:", error);
+  // Handle selected exercise from selection screen
+  useEffect(() => {
+    if (!params.selectedExerciseId || !params.selectedExerciseName) return;
+
+    const exerciseId = parseInt(params.selectedExerciseId as string);
+    const exerciseName = params.selectedExerciseName as string;
+
+    // Check if exercise already exists
+    const exerciseExists = exercises.some((e) => e.id === exerciseId);
+    if (exerciseExists) {
+      Alert.alert(
+        "Exercise Already Added",
+        `${exerciseName} is already in this workout.`
+      );
+      return;
     }
+
+    // Add the exercise
+    setExercises((prevExercises) => [
+      ...prevExercises,
+      {
+        id: exerciseId,
+        name: exerciseName,
+        sets: 3, // Default to 3 sets
+        singleArm: false,
+      },
+    ]);
+
+    // Clear the params after adding the exercise
+    router.setParams({
+      selectedExerciseId: undefined,
+      selectedExerciseName: undefined,
+    });
+  }, [params.selectedExerciseId, params.selectedExerciseName, exercises]);
+
+  // Load available exercises when modal opens
+  const handleOpenExerciseModal = () => {
+    router.push({
+      pathname: "/exercise/select",
+      params: {
+        path: "/workout/new",
+      },
+    });
   };
 
   const handleAddExercise = (exercise: Exercise) => {
@@ -117,7 +151,7 @@ function CreateWorkout() {
           Number(params.id),
           params.name as string,
           workoutName,
-          exercises.map(e => ({
+          exercises.map((e) => ({
             id: e.id,
             sets: e.sets,
             singleArm: e.singleArm,
@@ -185,7 +219,7 @@ function CreateWorkout() {
             <View style={styles.exerciseHeader}>
               <Text style={styles.exerciseName}>{exercise.name}</Text>
               <View style={styles.singleArmControl}>
-                <Text style={styles.singleArmLabel}>Single Arm</Text>
+                <Text style={styles.singleArmLabel}>Unilateral</Text>
                 <Switch
                   value={exercise.singleArm}
                   onValueChange={() => handleToggleSingleArm(index)}
@@ -221,37 +255,6 @@ function CreateWorkout() {
           </View>
         </TouchableOpacity>
       </ScrollView>
-
-      {/* Exercise Selection Modal */}
-      <Modal
-        visible={showExerciseModal}
-        animationType="slide"
-        transparent={true}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Exercise</Text>
-              <TouchableOpacity onPress={() => setShowExerciseModal(false)}>
-                <Ionicons name="close" size={24} color="#000" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.exercisesList}>
-              {availableExercises.map((exercise) => (
-                <TouchableOpacity
-                  key={exercise.id}
-                  style={styles.exerciseOption}
-                  onPress={() => handleAddExercise(exercise)}
-                >
-                  <Text style={styles.exerciseOptionText}>
-                    {exercise.exercise_name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -385,39 +388,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#007AFF",
     fontWeight: "600",
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end",
-  },
-  modalContent: {
-    backgroundColor: "white",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: "80%",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e1e1e1",
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-  },
-  exercisesList: {
-    padding: 16,
-  },
-  exerciseOption: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e1e1e1",
-  },
-  exerciseOptionText: {
-    fontSize: 16,
   },
 });

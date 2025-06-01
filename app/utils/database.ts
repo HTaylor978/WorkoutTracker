@@ -43,85 +43,128 @@ interface PreviousWorkoutRow {
 const presetExercises: Exercise[] = [
   {
     name: "Bench Press",
-    muscles: ["Chest", "Triceps", "Front Deltoids"],
+    muscles: ["Upper Chest", "Mid/Lower Chest", "Front Delt", "Tricep"],
   },
   {
     name: "Bicep Curls",
-    muscles: ["Biceps"],
+    muscles: ["Bicep", "Forearm Flexors"],
   },
   {
     name: "Squats",
-    muscles: ["Quadriceps", "Hamstrings", "Glutes"],
+    muscles: ["Quads", "Hamstrings", "Glutes", "Adductors"],
   },
   {
     name: "Deadlift",
-    muscles: ["Lower Back", "Hamstrings", "Glutes", "Trapezius"],
+    muscles: ["Upper Back", "Lats", "Hamstrings", "Glutes", "Traps"],
   },
   {
     name: "Pull-ups",
-    muscles: ["Latissimus Dorsi", "Biceps", "Rear Deltoids"],
+    muscles: ["Lats", "Bicep", "Rear Delt", "Upper Back"],
   },
   {
     name: "Shoulder Press",
-    muscles: ["Front Deltoids", "Middle Deltoids", "Triceps"],
+    muscles: ["Front Delt", "Side Delt", "Tricep"],
   },
   {
     name: "Tricep Pushdown",
-    muscles: ["Triceps"],
+    muscles: ["Tricep"],
   },
   {
     name: "Lat Pulldown",
-    muscles: ["Latissimus Dorsi", "Biceps"],
+    muscles: ["Lats", "Bicep", "Upper Back"],
   },
+];
+
+const presetMuscles = [
+  "Neck",
+  "Upper Chest",
+  "Mid/Lower Chest",
+  "Abs",
+  "Obliques",
+  "Front Delt",
+  "Side Delt",
+  "Rear Delt",
+  "Bicep",
+  "Tricep",
+  "Forearm Flexors",
+  "Forearm Extensors",
+  "Traps",
+  "Upper Back",
+  "Lats",
+  "Quads",
+  "Adductors",
+  "Abductors",
+  "Glutes",
+  "Hamstrings",
+  "Calves",
+  "Tibialis",
 ];
 
 const loadPresetData = async () => {
   const database = await getDb();
 
   try {
-    // Check if we already have exercises
-    const existingExercises = await database.getAllAsync(
-      "SELECT * FROM Exercises;"
-    );
-
-    if (existingExercises.length > 0) {
-      console.log("Exercises already exist, skipping preset data");
-      return;
-    }
-
-    // Add preset exercises and their muscles
-    for (const exercise of presetExercises) {
-      // Add exercise
-      const result = await database.runAsync(
-        "INSERT INTO Exercises (exercise_name) VALUES (?);",
-        [exercise.name]
-      );
-      const exerciseId = result.lastInsertRowId;
-
-      // Add muscles and create exercise-muscle relationships
-      for (const muscleName of exercise.muscles) {
-        // Add muscle if it doesn't exist
-        let muscleResult = await database.getFirstAsync<DbMuscle>(
+    // First, check and load muscles
+    console.log("Loading preset muscles...");
+    for (const muscleName of presetMuscles) {
+      try {
+        // Check if muscle already exists
+        const existingMuscle = await database.getFirstAsync<{ id: number }>(
           "SELECT id FROM Muscles WHERE muscle_name = ?;",
           [muscleName]
         );
 
-        let muscleId;
-        if (!muscleResult) {
-          const insertResult = await database.runAsync(
+        if (!existingMuscle) {
+          await database.runAsync(
             "INSERT INTO Muscles (muscle_name) VALUES (?);",
             [muscleName]
           );
-          muscleId = insertResult.lastInsertRowId;
+        }
+      } catch (error) {
+        console.error(`Error inserting muscle ${muscleName}:`, error);
+      }
+    }
+
+    // Then check and load preset exercises
+    console.log("Loading preset exercises...");
+    for (const exercise of presetExercises) {
+      try {
+        // Check if exercise already exists
+        const existingExercise = await database.getFirstAsync<{ id: number }>(
+          "SELECT id FROM Exercises WHERE exercise_name = ?;",
+          [exercise.name]
+        );
+
+        let exerciseId;
+        if (!existingExercise) {
+          // Add exercise
+          const result = await database.runAsync(
+            "INSERT INTO Exercises (exercise_name) VALUES (?);",
+            [exercise.name]
+          );
+          exerciseId = result.lastInsertRowId;
         } else {
-          muscleId = muscleResult.id;
+          exerciseId = existingExercise.id;
         }
 
-        // Create exercise-muscle relationship
-        await database.runAsync(
-          "INSERT INTO Exercise_Muscles (exercise_id, muscle_id) VALUES (?, ?);",
-          [exerciseId, muscleId]
-        );
+        // Add muscles and create exercise-muscle relationships
+        for (const muscleName of exercise.muscles) {
+          // Get muscle id
+          const muscleResult = await database.getFirstAsync<DbMuscle>(
+            "SELECT id FROM Muscles WHERE muscle_name = ?;",
+            [muscleName]
+          );
+
+          if (muscleResult) {
+            // Create exercise-muscle relationship
+            await database.runAsync(
+              "INSERT INTO Exercise_Muscles (exercise_id, muscle_id) VALUES (?, ?);",
+              [exerciseId, muscleResult.id]
+            );
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing exercise ${exercise.name}:`, error);
       }
     }
   } catch (error) {
@@ -134,6 +177,10 @@ export const initDatabase = async () => {
   if (!db) {
     console.log("Opening database...");
     db = await SQLite.openDatabaseAsync("workoutTracker.db");
+
+    // Enable foreign keys and write access
+    await db.execAsync("PRAGMA foreign_keys = ON;");
+    await db.execAsync("PRAGMA journal_mode = WAL;");
     console.log("Database opened");
 
     try {
@@ -160,11 +207,12 @@ export const initDatabase = async () => {
         );`
       );
 
+      // Create the Exercise_Muscles table with the new structure
       await db.execAsync(
         `CREATE TABLE IF NOT EXISTS Exercise_Muscles (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
           exercise_id INTEGER,
           muscle_id INTEGER,
-          PRIMARY KEY (exercise_id, muscle_id),
           FOREIGN KEY (exercise_id) REFERENCES Exercises(id),
           FOREIGN KEY (muscle_id) REFERENCES Muscles(id)
         );`
@@ -276,6 +324,14 @@ export const getExercises = async () => {
 };
 
 // Database operations for Muscles
+export const getMuscles = async () => {
+  const database = await getDb();
+  const muscles = await database.getAllAsync(
+    "SELECT * FROM Muscles ORDER BY muscle_name;"
+  );
+  return muscles;
+};
+
 export const addMuscle = async (muscleName: string) => {
   const database = await getDb();
   const result = await database.runAsync(

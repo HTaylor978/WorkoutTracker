@@ -171,6 +171,92 @@ const getProgressionColor = (
   return "rgba(255, 59, 48, 0.5)"; // Red
 };
 
+const getUnilateralProgressionColors = (
+  currentSet: {
+    weight: number;
+    reps_left?: number;
+    reps_right?: number;
+  },
+  previousSet?: {
+    weight: number;
+    reps_left?: number;
+    reps_right?: number;
+  }
+): { leftColor: string; rightColor: string } => {
+  if (!previousSet)
+    return { leftColor: "transparent", rightColor: "transparent" };
+
+  // Return transparent if either reps field is empty or zero
+  if (
+    !currentSet.reps_left ||
+    !currentSet.reps_right ||
+    currentSet.reps_left === 0 ||
+    currentSet.reps_right === 0
+  ) {
+    return { leftColor: "transparent", rightColor: "transparent" };
+  }
+
+  const currentWeight = currentSet.weight || 0;
+  const previousWeight = previousSet.weight || 0;
+
+  // Calculate colors for left arm
+  let leftColor = "rgba(255, 59, 48, 0.5)"; // Default to red
+  if (currentWeight > previousWeight) {
+    leftColor = "rgba(0, 122, 255, 0.5)"; // Blue
+  } else if (currentWeight === previousWeight) {
+    const currentLeftReps = currentSet.reps_left || 0;
+    const previousLeftReps = previousSet.reps_left || 0;
+
+    if (currentLeftReps > previousLeftReps) {
+      leftColor = "rgba(0, 122, 255, 0.5)"; // Blue
+    } else if (currentLeftReps === previousLeftReps) {
+      leftColor = "rgba(52, 199, 89, 0.5)"; // Green
+    } else if (previousLeftReps - currentLeftReps === 1) {
+      leftColor = "rgba(255, 204, 0, 0.5)"; // Yellow
+    }
+  }
+
+  // Calculate colors for right arm
+  let rightColor = "rgba(255, 59, 48, 0.5)"; // Default to red
+  if (currentWeight > previousWeight) {
+    rightColor = "rgba(0, 122, 255, 0.5)"; // Blue
+  } else if (currentWeight === previousWeight) {
+    const currentRightReps = currentSet.reps_right || 0;
+    const previousRightReps = previousSet.reps_right || 0;
+
+    if (currentRightReps > previousRightReps) {
+      rightColor = "rgba(0, 122, 255, 0.5)"; // Blue
+    } else if (currentRightReps === previousRightReps) {
+      rightColor = "rgba(52, 199, 89, 0.5)"; // Green
+    } else if (previousRightReps - currentRightReps === 1) {
+      rightColor = "rgba(255, 204, 0, 0.5)"; // Yellow
+    }
+  }
+
+  return { leftColor, rightColor };
+};
+
+const UnilateralProgressionDot: React.FC<{
+  currentSet: any;
+  previousSet?: any;
+}> = ({ currentSet, previousSet }) => {
+  const { leftColor, rightColor } = getUnilateralProgressionColors(
+    currentSet,
+    previousSet
+  );
+
+  return (
+    <View style={styles.progressionDot}>
+      <View
+        style={[styles.progressionDotHalf, { backgroundColor: leftColor }]}
+      />
+      <View
+        style={[styles.progressionDotHalf, { backgroundColor: rightColor }]}
+      />
+    </View>
+  );
+};
+
 const ExerciseProgression: React.FC<ExerciseProgressionProps> = ({
   exercise,
   previousExercise,
@@ -191,11 +277,18 @@ const ExerciseProgression: React.FC<ExerciseProgressionProps> = ({
         <View style={styles.progressionDots}>
           {displaySets.map((set, index) => {
             const previousSet = displayPreviousSets[index];
+            if (exercise.single_arm === 1) {
+              return (
+                <UnilateralProgressionDot
+                  key={index}
+                  currentSet={set}
+                  previousSet={previousSet}
+                />
+              );
+            }
             const currentSet = {
               weight: set.weight,
               reps: set.reps || undefined,
-              reps_left: set.reps_left || undefined,
-              reps_right: set.reps_right || undefined,
             };
             return (
               <View
@@ -567,6 +660,12 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
+    overflow: "hidden",
+    flexDirection: "row",
+  },
+  progressionDotHalf: {
+    width: 4,
+    height: 8,
     backgroundColor: "transparent",
   },
   additionalSets: {

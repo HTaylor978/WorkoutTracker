@@ -6,7 +6,6 @@ import {
   FlatList,
   GestureResponderEvent,
   ListRenderItem,
-  Modal,
   PanResponder,
   PanResponderGestureState,
   ScrollView,
@@ -18,7 +17,6 @@ import {
   View,
 } from "react-native";
 import {
-  getExercises,
   getPreviousExerciseData,
   getPreviousWorkoutData,
   getWorkoutExercises,
@@ -158,6 +156,73 @@ const getProgressionColor = (
   return "rgba(255, 59, 48, 0.5)"; // Red
 };
 
+const getUnilateralProgressionColors = (
+  currentSet: {
+    weight: string;
+    repsLeft?: string;
+    repsRight?: string;
+  },
+  previousSet?: {
+    weight: number;
+    repsLeft?: number;
+    repsRight?: number;
+  }
+): { leftColor: string; rightColor: string } => {
+  // Return transparent if no previous set or if weight is empty/zero
+  if (!previousSet || !currentSet.weight || currentSet.weight === "0") {
+    return { leftColor: "transparent", rightColor: "transparent" };
+  }
+
+  // Return transparent if either reps field is empty or zero
+  if (
+    !currentSet.repsLeft ||
+    !currentSet.repsRight ||
+    currentSet.repsLeft === "0" ||
+    currentSet.repsRight === "0"
+  ) {
+    return { leftColor: "transparent", rightColor: "transparent" };
+  }
+
+  const currentWeight = parseFloat(currentSet.weight);
+  const previousWeight = previousSet.weight;
+
+  // Calculate colors for left arm
+  let leftColor = "rgba(255, 59, 48, 0.5)"; // Default to red
+  if (currentWeight > previousWeight) {
+    leftColor = "rgba(0, 122, 255, 0.5)"; // Blue
+  } else if (currentWeight === previousWeight) {
+    const currentLeftReps = parseInt(currentSet.repsLeft);
+    const previousLeftReps = previousSet.repsLeft || 0;
+
+    if (currentLeftReps > previousLeftReps) {
+      leftColor = "rgba(0, 122, 255, 0.5)"; // Blue
+    } else if (currentLeftReps === previousLeftReps) {
+      leftColor = "rgba(52, 199, 89, 0.5)"; // Green
+    } else if (previousLeftReps - currentLeftReps === 1) {
+      leftColor = "rgba(255, 204, 0, 0.5)"; // Yellow
+    }
+  }
+
+  // Calculate colors for right arm
+  let rightColor = "rgba(255, 59, 48, 0.5)"; // Default to red
+  if (currentWeight > previousWeight) {
+    rightColor = "rgba(0, 122, 255, 0.5)"; // Blue
+  } else if (currentWeight === previousWeight) {
+    const currentRightReps = parseInt(currentSet.repsRight);
+    const previousRightReps = previousSet.repsRight || 0;
+
+    if (currentRightReps > previousRightReps) {
+      rightColor = "rgba(0, 122, 255, 0.5)"; // Blue
+    } else if (currentRightReps === previousRightReps) {
+      rightColor = "rgba(52, 199, 89, 0.5)"; // Green
+    } else if (previousRightReps - currentRightReps === 1) {
+      rightColor = "rgba(255, 204, 0, 0.5)"; // Yellow
+    }
+  }
+
+  return { leftColor, rightColor };
+};
+
 const SetTile: React.FC<SetTileProps> = ({
   exercise,
   exerciseIndex,
@@ -167,7 +232,12 @@ const SetTile: React.FC<SetTileProps> = ({
   handleUpdateSet,
   handleRemoveSet,
 }) => {
-  const backgroundColor = getProgressionColor(set, previousSetData);
+  const backgroundColor = exercise.singleArm
+    ? getUnilateralProgressionColors(set, previousSetData)
+    : {
+        leftColor: getProgressionColor(set, previousSetData),
+        rightColor: getProgressionColor(set, previousSetData),
+      };
 
   const renderInput = (
     value: string | undefined,
@@ -189,7 +259,21 @@ const SetTile: React.FC<SetTileProps> = ({
   );
 
   return (
-    <View style={[styles.setTileContainer, { backgroundColor }]}>
+    <View style={[styles.setTileContainer]}>
+      <View style={styles.setTileBackgrounds}>
+        <View
+          style={[
+            styles.setTileBackground,
+            { left: 0, backgroundColor: backgroundColor.leftColor },
+          ]}
+        />
+        <View
+          style={[
+            styles.setTileBackground,
+            { right: 0, backgroundColor: backgroundColor.rightColor },
+          ]}
+        />
+      </View>
       <View style={styles.setTileContent}>
         <View style={styles.setNumber}>
           <Text style={styles.setNumberText}>Set {setIndex + 1}</Text>
@@ -399,7 +483,7 @@ const ExerciseRow: React.FC<ExerciseRowProps> = ({
           <Text style={styles.exerciseName}>{exercise.name}</Text>
           <View style={styles.exerciseControls}>
             <View style={styles.singleArmToggle}>
-              <Text style={styles.singleArmLabel}>Single Arm</Text>
+              <Text style={styles.singleArmLabel}>Unilateral</Text>
               <Switch
                 value={exercise.singleArm}
                 onValueChange={() => handleToggleSingleArm(exerciseIndex)}
@@ -588,15 +672,64 @@ function CompleteWorkout() {
     loadWorkoutData();
   }, [logId, workoutId, params.name]);
 
-  const handleOpenExerciseModal = async () => {
-    try {
-      const exerciseList = await getExercises();
-      setAvailableExercises(exerciseList as Exercise[]);
-      setShowExerciseModal(true);
-    } catch (error) {
-      console.error("Error loading exercises:", error);
-      Alert.alert("Error", "Failed to load exercises");
-    }
+  // Handle selected exercise from selection screen
+  useEffect(() => {
+    const handleNewExercise = () => {
+      if (!params.selectedExerciseId || !params.selectedExerciseName) return;
+
+      const exerciseId = parseInt(params.selectedExerciseId as string);
+      const exerciseName = params.selectedExerciseName as string;
+
+      // Check if exercise already exists
+      const exerciseExists = exercises.some((e) => e.id === exerciseId);
+      if (exerciseExists) {
+        Alert.alert(
+          "Exercise Already Added",
+          `${exerciseName} is already in this workout.`
+        );
+        return;
+      }
+
+      // Add the exercise
+      setExercises((prevExercises) => [
+        ...prevExercises,
+        {
+          id: exerciseId,
+          name: exerciseName,
+          sets: 3, // Default to 3 sets
+          singleArm: false,
+          setData: Array(3)
+            .fill({})
+            .map(() => ({
+              weight: "0",
+              reps: "0",
+            })),
+        },
+      ]);
+
+      // Update previous workout data
+      setPreviousWorkoutData((prevData) => ({
+        ...prevData,
+        [exerciseId]: Array(3)
+          .fill({})
+          .map((_, index) => ({
+            weight: 0,
+            reps: 0,
+            setNumber: index + 1,
+          })),
+      }));
+    };
+
+    handleNewExercise();
+  }, [params.selectedExerciseId, params.selectedExerciseName]);
+
+  const handleOpenExerciseModal = () => {
+    router.push({
+      pathname: "/exercise/select",
+      params: {
+        path: "/workout/complete",
+      },
+    });
   };
 
   const handleAddExercise = async (exercise: Exercise) => {
@@ -1076,36 +1209,6 @@ function CompleteWorkout() {
         {/* Add extra padding for keyboard */}
         <View style={styles.keyboardPadding} />
       </ScrollView>
-
-      <Modal
-        visible={showExerciseModal}
-        animationType="slide"
-        transparent={true}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Exercise</Text>
-              <TouchableOpacity onPress={() => setShowExerciseModal(false)}>
-                <Ionicons name="close" size={24} color="#000" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.exercisesList}>
-              {availableExercises.map((exercise) => (
-                <TouchableOpacity
-                  key={exercise.id}
-                  style={styles.exerciseOption}
-                  onPress={() => handleAddExercise(exercise)}
-                >
-                  <Text style={styles.exerciseOptionText}>
-                    {exercise.exercise_name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -1206,7 +1309,27 @@ const styles = StyleSheet.create({
   setTileContainer: {
     width: TILE_WIDTH,
     height: 40,
-    backgroundColor: "white",
+    position: "relative",
+    overflow: "hidden",
+  },
+  setTileBackgrounds: {
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+    flexDirection: "row",
+  },
+  setTileBackground: {
+    position: "absolute",
+    width: "50%",
+    height: "100%",
+  },
+  setTileContent: {
+    position: "relative",
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    zIndex: 1,
   },
   inputContainer: {
     flexDirection: "row",
@@ -1307,12 +1430,6 @@ const styles = StyleSheet.create({
   setNumberText: {
     fontSize: 14,
     fontWeight: "600",
-  },
-  setTileContent: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
   },
   exerciseControls: {
     flexDirection: "row",
