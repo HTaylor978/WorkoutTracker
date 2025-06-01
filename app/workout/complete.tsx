@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import {
   getExercises,
+  getPreviousExerciseData,
   getPreviousWorkoutData,
   getWorkoutExercises,
   getWorkoutLogDetails,
@@ -75,20 +76,23 @@ const getProgressionColor = (
     repsRight?: number;
   }
 ): string => {
-  if (!previousSet || !currentSet.weight) return "transparent";
+  if (!previousSet) return "transparent";
 
+  // Check if the current set has been filled in
   const currentWeight = parseFloat(currentSet.weight) || 0;
-  const previousWeight = previousSet.weight;
+  if (currentWeight === 0) return "transparent";
 
   // For single-arm exercises
   if (currentSet.repsLeft !== undefined && currentSet.repsRight !== undefined) {
     const currentLeftReps = parseInt(currentSet.repsLeft) || 0;
     const currentRightReps = parseInt(currentSet.repsRight) || 0;
+
+    // Return transparent if either reps field is empty or zero
+    if (currentLeftReps === 0 || currentRightReps === 0) return "transparent";
+
+    const previousWeight = previousSet.weight;
     const previousLeftReps = previousSet.repsLeft || 0;
     const previousRightReps = previousSet.repsRight || 0;
-
-    // Only compare if user has entered both reps
-    if (!currentSet.repsLeft || !currentSet.repsRight) return "transparent";
 
     // Progress: Weight increase or both arms have more reps
     if (
@@ -123,10 +127,12 @@ const getProgressionColor = (
 
   // For regular exercises
   const currentReps = parseInt(currentSet.reps || "0");
-  const previousReps = previousSet.reps || 0;
 
-  // Only compare if user has entered reps
-  if (!currentSet.reps) return "transparent";
+  // Return transparent if reps field is empty or zero
+  if (currentReps === 0) return "transparent";
+
+  const previousWeight = previousSet.weight;
+  const previousReps = previousSet.reps || 0;
 
   // Progress: Weight increase or more reps
   if (currentWeight > previousWeight || currentReps > previousReps) {
@@ -170,7 +176,7 @@ const SetTile: React.FC<SetTileProps> = ({
         keyboardType="numeric"
         placeholder={placeholder || "0"}
         placeholderTextColor="#999"
-        value={value || ""}
+        value={value === "0" ? "" : value}
         onChangeText={onChangeText}
       />
       <Text style={styles.inputLabel}>{label}</Text>
@@ -198,14 +204,14 @@ const SetTile: React.FC<SetTileProps> = ({
               (value) =>
                 handleUpdateSet(exerciseIndex, setIndex, "repsLeft", value),
               "L",
-              previousSetData?.repsLeft?.toString()
+              previousSetData?.repsLeft?.toString() || "0"
             )}
             {renderInput(
               set.repsRight,
               (value) =>
                 handleUpdateSet(exerciseIndex, setIndex, "repsRight", value),
               "R",
-              previousSetData?.repsRight?.toString()
+              previousSetData?.repsRight?.toString() || "0"
             )}
           </View>
         ) : (
@@ -213,7 +219,7 @@ const SetTile: React.FC<SetTileProps> = ({
             set.reps,
             (value) => handleUpdateSet(exerciseIndex, setIndex, "reps", value),
             "reps",
-            previousSetData?.reps?.toString()
+            previousSetData?.reps?.toString() || "0"
           )
         )}
       </View>
@@ -524,16 +530,16 @@ function CompleteWorkout() {
             }));
 
           setExercises(transformedExercises);
-        } else {
-          // Load new workout template
+        } else if (workoutId !== 0) {
+          // Load new workout from template
           const workoutExercises = (await getWorkoutExercises(
-            workoutName
+            params.name as string
           )) as WorkoutTemplateExercise[];
 
-          // Get previous workout data
+          // Get previous workout data using the template name
           const previousData = await getPreviousWorkoutData(
             workoutId,
-            workoutName,
+            params.name as string,
             new Date().toISOString()
           );
           setPreviousWorkoutData(previousData);
@@ -544,24 +550,32 @@ function CompleteWorkout() {
               name: exercise.exercise_name,
               sets: exercise.sets_per_exercise,
               singleArm: Boolean(exercise.single_arm),
-              setData: Array(exercise.sets_per_exercise).fill({
-                weight: "",
-                ...(Boolean(exercise.single_arm)
-                  ? { repsLeft: "", repsRight: "" }
-                  : { reps: "" }),
-              }),
+              setData: Array(exercise.sets_per_exercise)
+                .fill({})
+                .map(() => ({
+                  weight: "0",
+                  ...(Boolean(exercise.single_arm)
+                    ? { repsLeft: "0", repsRight: "0" }
+                    : { reps: "0" }),
+                })),
             })
           );
           setExercises(exercisesWithSetData);
+        } else {
+          // This is a quick workout - start with empty exercises
+          setExercises([]);
+          setPreviousWorkoutData({});
         }
       } catch (error) {
         console.error("Error loading workout data:", error);
-        Alert.alert("Error", "Failed to load workout data");
+        if (workoutId) {
+          Alert.alert("Error", "Failed to load workout data");
+        }
       }
     };
 
     loadWorkoutData();
-  }, [workoutName, logId, workoutId]);
+  }, [logId, workoutId, params.name]);
 
   const handleOpenExerciseModal = async () => {
     try {
@@ -574,32 +588,88 @@ function CompleteWorkout() {
     }
   };
 
-  const handleAddExercise = (exercise: Exercise) => {
-    setExercises([
-      ...exercises,
-      {
-        id: exercise.id,
-        name: exercise.exercise_name,
-        sets: 3, // Default to 3 sets
-        singleArm: false, // Default to regular exercise
-        setData: Array(3).fill({
-          weight: "",
-          reps: "",
+  const handleAddExercise = async (exercise: Exercise) => {
+    try {
+      // Get previous exercise data
+      const previousData = await getPreviousExerciseData(
+        exercise.id,
+        new Date().toISOString()
+      );
+
+      // Default to 3 sets if no previous data exists
+      const numSets = previousData.length || 3;
+
+      // Add the exercise to the exercises list
+      setExercises([
+        ...exercises,
+        {
+          id: exercise.id,
+          name: exercise.exercise_name,
+          sets: numSets,
+          singleArm: false, // Default to regular exercise
+          setData: Array(numSets)
+            .fill({})
+            .map(() => ({
+              weight: "",
+              reps: "", // Always start with regular exercise format
+            })),
+        },
+      ]);
+
+      // Update the previous workout data state with the reference values
+      setPreviousWorkoutData((prevData) => ({
+        ...prevData,
+        [exercise.id]: previousData.map((set, index) => {
+          if ("repsLeft" in set && "repsRight" in set) {
+            return {
+              weight: set.weight,
+              repsLeft: set.repsLeft,
+              repsRight: set.repsRight,
+              setNumber: index + 1,
+            };
+          }
+          return {
+            weight: set.weight,
+            reps: set.reps,
+            setNumber: index + 1,
+          };
         }),
-      },
-    ]);
-    setShowExerciseModal(false);
+      }));
+    } catch (error) {
+      console.error("Error getting previous exercise data:", error);
+      Alert.alert("Error", "Failed to get previous exercise data");
+    }
   };
 
   const handleAddSet = (exerciseIndex: number) => {
     const updatedExercises = [...exercises];
     const exercise = updatedExercises[exerciseIndex];
     exercise.setData.push({
-      weight: "",
-      ...(exercise.singleArm ? { repsLeft: "", repsRight: "" } : { reps: "" }),
+      weight: "0",
+      ...(exercise.singleArm
+        ? { repsLeft: "0", repsRight: "0" }
+        : { reps: "0" }),
     });
     exercise.sets += 1;
     setExercises(updatedExercises);
+
+    // Update previous workout data for the new set
+    setPreviousWorkoutData((prevData) => {
+      const exerciseData = prevData[exercise.id] || [];
+      return {
+        ...prevData,
+        [exercise.id]: [
+          ...exerciseData,
+          {
+            weight: 0,
+            ...(exercise.singleArm
+              ? { repsLeft: 0, repsRight: 0 }
+              : { reps: 0 }),
+            setNumber: exerciseData.length + 1,
+          },
+        ],
+      };
+    });
   };
 
   const handleRemoveSet = (exerciseIndex: number, setIndex: number) => {
@@ -711,11 +781,22 @@ function CompleteWorkout() {
       }));
 
       if (logId) {
-        // Update existing workout log
+        // Update existing workout log with new name
         await updateWorkoutLog(logId, exercisesForSaving, workoutName);
       } else {
-        // Save new workout log
-        await saveWorkoutLog(workoutId || 0, exercisesForSaving, workoutName);
+        // For a new workout log
+        let currentWorkoutId = workoutId;
+        if (currentWorkoutId === 0) {
+          // This is a quick workout, save it directly to the workout log without creating a routine
+          await saveWorkoutLog(0, exercisesForSaving, workoutName);
+        } else {
+          // Save the workout log with the existing workout ID (from a routine)
+          await saveWorkoutLog(
+            currentWorkoutId,
+            exercisesForSaving,
+            workoutName
+          );
+        }
       }
 
       router.replace("/(tabs)");
@@ -794,7 +875,13 @@ function CompleteWorkout() {
         >
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
-        <Text style={styles.title}>{workoutName}</Text>
+        <TextInput
+          style={styles.workoutNameInput}
+          value={workoutName}
+          onChangeText={setWorkoutName}
+          placeholder="Enter workout name"
+          placeholderTextColor="rgba(255, 255, 255, 0.7)"
+        />
         <TouchableOpacity
           style={styles.finishButton}
           onPress={handleFinishWorkout}
@@ -877,7 +964,6 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     backgroundColor: "#007AFF",
     padding: 16,
     paddingTop: 60,
@@ -885,12 +971,15 @@ const styles = StyleSheet.create({
   backButton: {
     padding: 8,
   },
-  title: {
-    fontSize: 20,
+  workoutNameInput: {
+    flex: 1,
+    fontSize: 18,
     fontWeight: "600",
     color: "white",
-    flex: 1,
-    marginLeft: 16,
+    marginHorizontal: 16,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
   },
   finishButton: {
     padding: 8,

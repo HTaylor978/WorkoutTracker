@@ -474,28 +474,17 @@ export const getWorkoutLogs = async () => {
   try {
     console.log("Executing getWorkoutLogs query...");
 
-    // First, check if we have any workouts
-    const workouts = await database.getAllAsync("SELECT * FROM Workouts;");
-    console.log("Total workouts in database:", workouts.length);
-
-    // Then check workout logs
-    const workoutLogs = await database.getAllAsync(
-      "SELECT * FROM Workout_Logs;"
-    );
-    console.log("Total workout logs in database:", workoutLogs.length);
-
-    // Now get the full workout log data
+    // Get all workout logs
     const logs = await database.getAllAsync(`
       SELECT 
         wl.id as log_id,
         wl.date,
-        w.id as workout_id,
-        w.workout_name
+        wl.workout_id,
+        wl.workout_name
       FROM Workout_Logs wl
-      JOIN Workouts w ON w.id = wl.workout_id
       ORDER BY wl.date DESC;
     `);
-    console.log("Retrieved logs with workout details:", logs);
+    console.log("Retrieved logs:", logs);
     return logs;
   } catch (error) {
     console.error("Error getting workout logs:", error);
@@ -518,10 +507,9 @@ export const getWorkoutLogDetails = async (logId: number) => {
       SELECT 
         wl.id as log_id,
         wl.date,
-        w.id as workout_id,
-        w.workout_name
+        wl.workout_id,
+        wl.workout_name
       FROM Workout_Logs wl
-      JOIN Workouts w ON w.id = wl.workout_id
       WHERE wl.id = ?;
     `,
       [logId]
@@ -732,8 +720,65 @@ export const getPreviousWorkoutData = async (
       [workoutId, currentDate]
     );
 
-    // If no previous workout exists, get all exercises for this workout and create zero-value data
+    // If no previous workout exists for this workout_id
     if (previousWorkout.length === 0) {
+      // For quick workouts (workoutId === 0) or when no previous data exists for this workout,
+      // try to find the most recent data for each exercise from any workout
+      if (workoutId === 0) {
+        const exerciseData: {
+          [key: number]: Array<{
+            weight: number;
+            reps?: number;
+            repsLeft?: number;
+            repsRight?: number;
+            setNumber: number;
+          }>;
+        } = {};
+
+        // Get the most recent workout data for each exercise
+        const recentExerciseData =
+          await database.getAllAsync<PreviousWorkoutRow>(
+            `
+          WITH RankedWorkouts AS (
+            SELECT 
+              wl.id as log_id,
+              wl.date,
+              el.exercise_id,
+              el.id as exercise_log_id,
+              sl.set_number,
+              sl.weight,
+              sl.reps,
+              sl.reps_left,
+              sl.reps_right,
+              ROW_NUMBER() OVER (PARTITION BY el.exercise_id ORDER BY wl.date DESC) as rn
+            FROM Workout_Logs wl
+            JOIN Exercise_Logs el ON el.workout_log_id = wl.id
+            JOIN Set_Logs sl ON sl.exercise_log_id = el.id
+            WHERE wl.date < ?
+          )
+          SELECT * FROM RankedWorkouts WHERE rn = 1;
+        `,
+            [currentDate]
+          );
+
+        // Group the data by exercise
+        for (const row of recentExerciseData) {
+          if (!exerciseData[row.exercise_id]) {
+            exerciseData[row.exercise_id] = [];
+          }
+          exerciseData[row.exercise_id].push({
+            weight: row.weight,
+            reps: row.reps ?? undefined,
+            repsLeft: row.reps_left ?? undefined,
+            repsRight: row.reps_right ?? undefined,
+            setNumber: row.set_number,
+          });
+        }
+
+        return exerciseData;
+      }
+
+      // For template workouts, get exercises from the template
       const workoutExercises = await database.getAllAsync<{
         id: number;
         single_arm: number;
@@ -795,6 +840,66 @@ export const getPreviousWorkoutData = async (
     return exerciseData;
   } catch (error) {
     console.error("Error getting previous workout data:", error);
+    throw error;
+  }
+};
+
+// Get previous data for a specific exercise
+export const getPreviousExerciseData = async (
+  exerciseId: number,
+  currentDate: string
+) => {
+  const database = await getDb();
+  try {
+    // Get the most recent workout data for this exercise
+    const previousSets = await database.getAllAsync<{
+      set_number: number;
+      weight: number;
+      reps: number | null;
+      reps_left: number | null;
+      reps_right: number | null;
+      single_arm: number;
+    }>(
+      `
+      WITH LatestWorkout AS (
+        SELECT 
+          wl.id as workout_log_id,
+          wl.date
+        FROM Workout_Logs wl
+        JOIN Exercise_Logs el ON el.workout_log_id = wl.id
+        WHERE el.exercise_id = ? AND wl.date < ?
+        ORDER BY wl.date DESC
+        LIMIT 1
+      )
+      SELECT 
+        sl.set_number,
+        sl.weight,
+        sl.reps,
+        sl.reps_left,
+        sl.reps_right,
+        el.single_arm
+      FROM LatestWorkout lw
+      JOIN Exercise_Logs el ON el.workout_log_id = lw.workout_log_id
+      JOIN Set_Logs sl ON sl.exercise_log_id = el.id
+      WHERE el.exercise_id = ?
+      ORDER BY sl.set_number;
+    `,
+      [exerciseId, currentDate, exerciseId]
+    );
+
+    if (previousSets.length === 0) {
+      return [];
+    }
+
+    return previousSets.map((set) => ({
+      weight: set.weight,
+      ...(set.single_arm === 1
+        ? { repsLeft: set.reps_left || 0, repsRight: set.reps_right || 0 }
+        : { reps: set.reps || 0 }),
+      setNumber: set.set_number,
+    }));
+  } catch (error) {
+    console.error("Error getting previous exercise data:", error);
     throw error;
   }
 };

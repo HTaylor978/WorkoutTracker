@@ -62,6 +62,13 @@ function SelectWorkout() {
     }
   };
 
+  const handleQuickWorkout = () => {
+    router.push({
+      pathname: "/workout/complete",
+      params: { name: "Quick Workout" },
+    });
+  };
+
   return (
     <View style={styles.container}>
       {/* Top Bar with back button */}
@@ -73,6 +80,12 @@ function SelectWorkout() {
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.title}>Select Workout</Text>
+        <TouchableOpacity
+          style={styles.quickWorkoutButton}
+          onPress={handleQuickWorkout}
+        >
+          <Ionicons name="flash" size={24} color="white" />
+        </TouchableOpacity>
       </View>
 
       {/* Workout Grid */}
@@ -130,6 +143,10 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "600",
     color: "white",
+    flex: 1,
+  },
+  quickWorkoutButton: {
+    padding: 8,
   },
   scrollContainer: {
     flex: 1,
