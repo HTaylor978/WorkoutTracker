@@ -24,6 +24,8 @@ interface WorkoutLog {
   workout_id: number;
   workout_name: string;
   date: string;
+  start_time: string;
+  end_time: string;
 }
 
 interface WorkoutLogDetails {
@@ -45,8 +47,28 @@ interface WorkoutLogDetails {
 }
 
 interface ExerciseProgressionProps {
-  exercise: WorkoutLogDetails["exercises"][0];
-  previousExercise?: WorkoutLogDetails["exercises"][0];
+  exercise: {
+    exercise_id: number;
+    exercise_name: string;
+    single_arm: number;
+    sets: Array<{
+      weight: number;
+      reps?: number;
+      reps_left?: number;
+      reps_right?: number;
+    }>;
+  };
+  previousExercise?: {
+    exercise_id: number;
+    exercise_name: string;
+    single_arm: number;
+    sets: Array<{
+      weight: number;
+      reps?: number;
+      reps_left?: number;
+      reps_right?: number;
+    }>;
+  };
 }
 
 const TILE_WIDTH = Dimensions.get("window").width - 32; // Screen width minus padding
@@ -65,75 +87,87 @@ const getProgressionColor = (
     reps_right?: number;
   }
 ): string => {
-  if (!previousSet) return "rgba(0, 122, 255, 0.5)"; // Blue for first time
+  if (!previousSet) return "transparent";
 
   // For single-arm exercises
   if (
     currentSet.reps_left !== undefined &&
     currentSet.reps_right !== undefined
   ) {
-    const previousLeftReps = previousSet.reps_left || 0;
-    const previousRightReps = previousSet.reps_right || 0;
+    // Return transparent if either reps field is empty or zero
+    if (
+      !currentSet.reps_left ||
+      !currentSet.reps_right ||
+      currentSet.reps_left === 0 ||
+      currentSet.reps_right === 0
+    ) {
+      return "transparent";
+    }
+
+    const currentWeight = currentSet.weight || 0;
     const currentLeftReps = currentSet.reps_left || 0;
     const currentRightReps = currentSet.reps_right || 0;
+    const previousWeight = previousSet.weight || 0;
+    const previousLeftReps = previousSet.reps_left || 0;
+    const previousRightReps = previousSet.reps_right || 0;
 
-    // Progress: Weight increase or both arms have more reps
-    if (
-      currentSet.weight > previousSet.weight ||
-      (currentLeftReps > previousLeftReps &&
-        currentRightReps > previousRightReps)
-    ) {
+    // Progress: Weight increase OR same weight with more reps
+    if (currentWeight > previousWeight) {
       return "rgba(0, 122, 255, 0.5)"; // Blue
     }
 
-    // Maintained: Same weight and reps
-    if (
-      currentSet.weight === previousSet.weight &&
-      currentLeftReps === previousLeftReps &&
-      currentRightReps === previousRightReps
-    ) {
-      return "rgba(52, 199, 89, 0.5)"; // Green
+    if (currentWeight === previousWeight) {
+      if (
+        currentLeftReps > previousLeftReps &&
+        currentRightReps > previousRightReps
+      ) {
+        return "rgba(0, 122, 255, 0.5)"; // Blue
+      }
+      if (
+        currentLeftReps === previousLeftReps &&
+        currentRightReps === previousRightReps
+      ) {
+        return "rgba(52, 199, 89, 0.5)"; // Green
+      }
+      if (
+        Math.abs(currentLeftReps - previousLeftReps) <= 1 &&
+        Math.abs(currentRightReps - previousRightReps) <= 1
+      ) {
+        return "rgba(255, 204, 0, 0.5)"; // Yellow
+      }
     }
 
-    // Small loss: One rep less on either arm
-    if (
-      currentSet.weight === previousSet.weight &&
-      Math.abs(currentLeftReps - previousLeftReps) <= 1 &&
-      Math.abs(currentRightReps - previousRightReps) <= 1
-    ) {
-      return "rgba(255, 204, 0, 0.5)"; // Yellow
-    }
-
-    // Large loss: Weight decrease or 2+ reps less
     return "rgba(255, 59, 48, 0.5)"; // Red
   }
 
   // For regular exercises
+  // Return transparent if reps field is empty or zero
+  if (!currentSet.reps || currentSet.reps === 0) {
+    return "transparent";
+  }
+
+  const currentWeight = currentSet.weight || 0;
   const currentReps = currentSet.reps || 0;
+  const previousWeight = previousSet.weight || 0;
   const previousReps = previousSet.reps || 0;
 
-  // Progress: Weight increase or more reps
-  if (currentSet.weight > previousSet.weight || currentReps > previousReps) {
+  // Progress: Weight increase OR same weight with more reps
+  if (currentWeight > previousWeight) {
     return "rgba(0, 122, 255, 0.5)"; // Blue
   }
 
-  // Maintained: Same weight and reps
-  if (
-    currentSet.weight === previousSet.weight &&
-    currentReps === previousReps
-  ) {
-    return "rgba(52, 199, 89, 0.5)"; // Green
+  if (currentWeight === previousWeight) {
+    if (currentReps > previousReps) {
+      return "rgba(0, 122, 255, 0.5)"; // Blue
+    }
+    if (currentReps === previousReps) {
+      return "rgba(52, 199, 89, 0.5)"; // Green
+    }
+    if (previousReps - currentReps === 1) {
+      return "rgba(255, 204, 0, 0.5)"; // Yellow
+    }
   }
 
-  // Small loss: One rep less
-  if (
-    currentSet.weight === previousSet.weight &&
-    previousReps - currentReps === 1
-  ) {
-    return "rgba(255, 204, 0, 0.5)"; // Yellow
-  }
-
-  // Large loss: Weight decrease or 2+ reps less
   return "rgba(255, 59, 48, 0.5)"; // Red
 };
 
@@ -141,64 +175,59 @@ const ExerciseProgression: React.FC<ExerciseProgressionProps> = ({
   exercise,
   previousExercise,
 }) => {
+  const MAX_DOTS = 5;
+  const totalSets = exercise.sets.length;
+  const setsToShow = Math.min(totalSets, MAX_DOTS);
+
+  // Create an array of the first MAX_DOTS sets
+  const displaySets = exercise.sets.slice(0, setsToShow);
+  // Get corresponding previous sets
+  const displayPreviousSets = previousExercise?.sets.slice(0, setsToShow) || [];
+
   return (
     <View style={styles.exerciseRow}>
       <Text style={styles.exerciseName}>{exercise.exercise_name}</Text>
-      <View style={styles.progressionDots}>
-        {exercise.sets.map((set, index) => {
-          // Convert string values to numbers for comparison
-          const currentSet = {
-            weight: parseFloat(set.weight.toString()) || 0,
-            ...(set.reps !== undefined
-              ? { reps: parseInt(set.reps.toString()) || 0 }
-              : {
-                  reps_left: parseInt(set.reps_left?.toString() || "0"),
-                  reps_right: parseInt(set.reps_right?.toString() || "0"),
-                }),
-          };
-
-          const previousSet = previousExercise?.sets[index]
-            ? {
-                weight:
-                  parseFloat(previousExercise.sets[index].weight.toString()) ||
-                  0,
-                ...(previousExercise.sets[index].reps !== undefined
-                  ? {
-                      reps: parseInt(
-                        previousExercise.sets[index].reps?.toString() || "0"
-                      ),
-                    }
-                  : {
-                      reps_left: parseInt(
-                        previousExercise.sets[index].reps_left?.toString() ||
-                          "0"
-                      ),
-                      reps_right: parseInt(
-                        previousExercise.sets[index].reps_right?.toString() ||
-                          "0"
-                      ),
-                    }),
-              }
-            : undefined;
-
-          return (
-            <View
-              key={index}
-              style={[
-                styles.progressionDot,
-                {
-                  backgroundColor: getProgressionColor(currentSet, previousSet),
-                },
-              ]}
-            />
-          );
-        })}
+      <View style={styles.progressionContainer}>
+        <View style={styles.progressionDots}>
+          {displaySets.map((set, index) => {
+            const previousSet = displayPreviousSets[index];
+            const currentSet = {
+              weight: set.weight,
+              reps: set.reps || undefined,
+              reps_left: set.reps_left || undefined,
+              reps_right: set.reps_right || undefined,
+            };
+            return (
+              <View
+                key={index}
+                style={[
+                  styles.progressionDot,
+                  {
+                    backgroundColor: getProgressionColor(
+                      currentSet,
+                      previousSet
+                    ),
+                  },
+                ]}
+              />
+            );
+          })}
+        </View>
+        {totalSets > MAX_DOTS && (
+          <Text style={styles.additionalSets}>+{totalSets - MAX_DOTS}</Text>
+        )}
       </View>
     </View>
   );
 };
 
-const WorkoutLogCard = ({ log }: { log: WorkoutLog }) => {
+const WorkoutLogCard = ({
+  log,
+  onDelete,
+}: {
+  log: WorkoutLog;
+  onDelete: (logId: number) => void;
+}) => {
   const [detailedLog, setDetailedLog] = useState<WorkoutLogDetails | null>(
     null
   );
@@ -258,7 +287,10 @@ const WorkoutLogCard = ({ log }: { log: WorkoutLog }) => {
                 toValue: -400,
                 duration: 300,
                 useNativeDriver: true,
-              }).start();
+              }).start(() => {
+                // Call the onDelete callback after animation completes
+                onDelete(log.log_id);
+              });
             } catch (error) {
               console.error("Error deleting workout log:", error);
               Alert.alert("Error", "Failed to delete workout log");
@@ -269,16 +301,34 @@ const WorkoutLogCard = ({ log }: { log: WorkoutLog }) => {
         },
       ]
     );
-  }, [log.log_id, slideAnim]);
+  }, [log.log_id, slideAnim, onDelete]);
+
+  const formatDateTime = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    });
+  };
+
+  const calculateDuration = (startTime: string, endTime: string) => {
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    const durationMs = end.getTime() - start.getTime();
+    const minutes = Math.floor(durationMs / (1000 * 60));
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+
+    if (hours > 0) {
+      return `${hours}h ${remainingMinutes}m`;
+    }
+    return `${minutes}m`;
+  };
 
   if (!detailedLog) return null;
 
-  const date = new Date(log.date);
-  const formattedDate = date.toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
+  const formattedDate = formatDateTime(log.date);
+  const duration = calculateDuration(log.start_time, log.end_time);
 
   const mainContent = (
     <Link
@@ -293,7 +343,10 @@ const WorkoutLogCard = ({ log }: { log: WorkoutLog }) => {
       <TouchableOpacity style={styles.cardContent}>
         <View style={styles.cardHeader}>
           <Text style={styles.workoutName}>{log.workout_name}</Text>
-          <Text style={styles.date}>{formattedDate}</Text>
+          <View style={styles.dateTimeContainer}>
+            <Text style={styles.date}>{formattedDate}</Text>
+            <Text style={styles.duration}>{duration}</Text>
+          </View>
         </View>
         {detailedLog.exercises.map((exercise, index) => (
           <ExerciseProgression
@@ -349,6 +402,12 @@ export default function HomeScreen() {
     }
   };
 
+  const handleDeleteWorkoutLog = (logId: number) => {
+    setWorkoutLogs((currentLogs) =>
+      currentLogs.filter((log) => log.log_id !== logId)
+    );
+  };
+
   useFocusEffect(
     useCallback(() => {
       loadWorkoutLogs();
@@ -369,7 +428,9 @@ export default function HomeScreen() {
         <Text style={styles.subtitle}>Recent Workouts</Text>
         <FlatList
           data={workoutLogs}
-          renderItem={({ item }) => <WorkoutLogCard log={item} />}
+          renderItem={({ item }) => (
+            <WorkoutLogCard log={item} onDelete={handleDeleteWorkoutLog} />
+          )}
           keyExtractor={(item) => item.log_id.toString()}
           contentContainerStyle={styles.workoutList}
           showsVerticalScrollIndicator={false}
@@ -471,19 +532,32 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#333",
   },
+  dateTimeContainer: {
+    alignItems: "flex-end",
+  },
   date: {
     fontSize: 14,
     color: "#666",
   },
+  duration: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 2,
+  },
   exerciseRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 6,
   },
   exerciseName: {
     flex: 1,
     fontSize: 14,
     color: "#666",
+  },
+  progressionContainer: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   progressionDots: {
     flexDirection: "row",
@@ -493,6 +567,12 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
+    backgroundColor: "transparent",
+  },
+  additionalSets: {
+    marginLeft: 8,
+    fontSize: 12,
+    color: "#666",
   },
   removeButton: {
     width: TILE_WIDTH,

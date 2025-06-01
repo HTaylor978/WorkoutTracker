@@ -76,80 +76,85 @@ const getProgressionColor = (
     repsRight?: number;
   }
 ): string => {
-  if (!previousSet) return "transparent";
-
-  // Check if the current set has been filled in
-  const currentWeight = parseFloat(currentSet.weight) || 0;
-  if (currentWeight === 0) return "transparent";
+  // Return transparent if no actual data has been entered
+  if (!currentSet.weight || currentSet.weight === "0") return "transparent";
 
   // For single-arm exercises
   if (currentSet.repsLeft !== undefined && currentSet.repsRight !== undefined) {
-    const currentLeftReps = parseInt(currentSet.repsLeft) || 0;
-    const currentRightReps = parseInt(currentSet.repsRight) || 0;
-
-    // Return transparent if either reps field is empty or zero
-    if (currentLeftReps === 0 || currentRightReps === 0) return "transparent";
-
-    const previousWeight = previousSet.weight;
-    const previousLeftReps = previousSet.repsLeft || 0;
-    const previousRightReps = previousSet.repsRight || 0;
-
-    // Progress: Weight increase or both arms have more reps
+    // Return transparent if either reps field is empty or not filled in
     if (
-      currentWeight > previousWeight ||
-      (currentLeftReps > previousLeftReps &&
-        currentRightReps > previousRightReps)
+      !currentSet.repsLeft ||
+      !currentSet.repsRight ||
+      currentSet.repsLeft === "0" ||
+      currentSet.repsRight === "0"
     ) {
+      return "transparent";
+    }
+
+    const currentWeight = parseFloat(currentSet.weight || "0");
+    const currentLeftReps = parseInt(currentSet.repsLeft || "0");
+    const currentRightReps = parseInt(currentSet.repsRight || "0");
+    const previousWeight = previousSet?.weight || 0;
+    const previousLeftReps = previousSet?.repsLeft || 0;
+    const previousRightReps = previousSet?.repsRight || 0;
+
+    // Progress: Weight increase OR same weight with more reps
+    if (currentWeight > previousWeight) {
       return "rgba(0, 122, 255, 0.5)"; // Blue
     }
 
-    // Maintained: Same weight and reps
-    if (
-      currentWeight === previousWeight &&
-      currentLeftReps === previousLeftReps &&
-      currentRightReps === previousRightReps
-    ) {
-      return "rgba(52, 199, 89, 0.5)"; // Green
+    if (currentWeight === previousWeight) {
+      if (
+        currentLeftReps > previousLeftReps &&
+        currentRightReps > previousRightReps
+      ) {
+        return "rgba(0, 122, 255, 0.5)"; // Blue
+      }
+      if (
+        currentLeftReps === previousLeftReps &&
+        currentRightReps === previousRightReps
+      ) {
+        return "rgba(52, 199, 89, 0.5)"; // Green
+      }
+      if (
+        Math.abs(currentLeftReps - previousLeftReps) <= 1 &&
+        Math.abs(currentRightReps - previousRightReps) <= 1
+      ) {
+        return "rgba(255, 204, 0, 0.5)"; // Yellow
+      }
     }
 
-    // Small loss: One rep less on either arm
-    if (
-      currentWeight === previousWeight &&
-      Math.abs(currentLeftReps - previousLeftReps) <= 1 &&
-      Math.abs(currentRightReps - previousRightReps) <= 1
-    ) {
-      return "rgba(255, 204, 0, 0.5)"; // Yellow
-    }
-
-    // Large loss: Weight decrease or 2+ reps less
     return "rgba(255, 59, 48, 0.5)"; // Red
   }
 
   // For regular exercises
+  // Return transparent if reps field is empty or not filled in
+  if (!currentSet.reps || currentSet.reps === "0") {
+    return "transparent";
+  }
+
+  const currentWeight = parseFloat(currentSet.weight || "0");
   const currentReps = parseInt(currentSet.reps || "0");
+  const previousWeight = previousSet?.weight || 0;
+  const previousReps = previousSet?.reps || 0;
 
-  // Return transparent if reps field is empty or zero
-  if (currentReps === 0) return "transparent";
-
-  const previousWeight = previousSet.weight;
-  const previousReps = previousSet.reps || 0;
-
-  // Progress: Weight increase or more reps
-  if (currentWeight > previousWeight || currentReps > previousReps) {
+  // Progress: Weight increase OR same weight with more reps
+  if (currentWeight > previousWeight) {
     return "rgba(0, 122, 255, 0.5)"; // Blue
   }
 
-  // Maintained: Same weight and reps
-  if (currentWeight === previousWeight && currentReps === previousReps) {
-    return "rgba(52, 199, 89, 0.5)"; // Green
+  if (currentWeight === previousWeight) {
+    if (currentReps > previousReps) {
+      return "rgba(0, 122, 255, 0.5)"; // Blue
+    }
+    if (currentReps === previousReps) {
+      return "rgba(52, 199, 89, 0.5)"; // Green
+    }
+    if (previousReps - currentReps === 1) {
+      return "rgba(255, 204, 0, 0.5)"; // Yellow
+    }
   }
 
-  // Small loss: One rep less
-  if (currentWeight === previousWeight && previousReps - currentReps === 1) {
-    return "rgba(255, 204, 0, 0.5)"; // Yellow
-  }
-
-  // Large loss: Weight decrease or 2+ reps less
   return "rgba(255, 59, 48, 0.5)"; // Red
 };
 
@@ -452,6 +457,8 @@ interface WorkoutLog {
   workout_id: number;
   workout_name: string;
   date: string;
+  start_time: string;
+  end_time: string;
   exercises: WorkoutLogExercise[];
 }
 
@@ -471,6 +478,9 @@ function CompleteWorkout() {
   );
   const [logId, setLogId] = useState(
     params.logId ? parseInt(params.logId as string) : 0
+  );
+  const [startTime, setStartTime] = useState<string>(
+    (params.startTime as string) || new Date().toISOString()
   );
   const [exercises, setExercises] = useState<WorkoutExercise[]>([]);
   const [previousWorkoutData, setPreviousWorkoutData] = useState<{
@@ -502,6 +512,7 @@ function CompleteWorkout() {
           const workoutLog = (await getWorkoutLogDetails(logId)) as WorkoutLog;
           setWorkoutId(workoutLog.workout_id);
           setWorkoutName(workoutLog.workout_name);
+          setStartTime(workoutLog.start_time || workoutLog.date);
 
           // Get previous workout data
           const previousData = await getPreviousWorkoutData(
@@ -590,6 +601,16 @@ function CompleteWorkout() {
 
   const handleAddExercise = async (exercise: Exercise) => {
     try {
+      // Check if exercise already exists in the workout
+      const exerciseExists = exercises.some((e) => e.id === exercise.id);
+      if (exerciseExists) {
+        Alert.alert(
+          "Exercise Already Added",
+          `${exercise.exercise_name} is already in this workout.`
+        );
+        return;
+      }
+
       // Get previous exercise data
       const previousData = await getPreviousExerciseData(
         exercise.id,
@@ -616,25 +637,39 @@ function CompleteWorkout() {
         },
       ]);
 
-      // Update the previous workout data state with the reference values
+      // Update the previous workout data state with zeros if no previous data exists
       setPreviousWorkoutData((prevData) => ({
         ...prevData,
-        [exercise.id]: previousData.map((set, index) => {
-          if ("repsLeft" in set && "repsRight" in set) {
-            return {
-              weight: set.weight,
-              repsLeft: set.repsLeft,
-              repsRight: set.repsRight,
-              setNumber: index + 1,
-            };
-          }
-          return {
-            weight: set.weight,
-            reps: set.reps,
-            setNumber: index + 1,
-          };
-        }),
+        [exercise.id]:
+          previousData.length > 0
+            ? previousData.map((set, index) => {
+                const baseSet = {
+                  weight: set.weight,
+                  setNumber: index + 1,
+                };
+                if ("repsLeft" in set && "repsRight" in set) {
+                  return {
+                    ...baseSet,
+                    repsLeft: set.repsLeft || 0,
+                    repsRight: set.repsRight || 0,
+                  };
+                }
+                return {
+                  ...baseSet,
+                  reps: set.reps || 0,
+                };
+              })
+            : Array(numSets)
+                .fill({})
+                .map((_, index) => ({
+                  weight: 0,
+                  reps: 0,
+                  setNumber: index + 1,
+                })),
       }));
+
+      // Close the exercise modal after adding
+      setShowExerciseModal(false);
     } catch (error) {
       console.error("Error getting previous exercise data:", error);
       Alert.alert("Error", "Failed to get previous exercise data");
@@ -720,10 +755,24 @@ function CompleteWorkout() {
   ) => {
     const updatedExercises = [...exercises];
     const exercise = updatedExercises[exerciseIndex];
-    exercise.setData[setIndex] = {
-      ...exercise.setData[setIndex],
-      [field]: value,
-    };
+    const set = exercise.setData[setIndex];
+    const previousSetData = previousWorkoutData[exercise.id]?.find(
+      (prevSet) => prevSet.setNumber === setIndex + 1
+    );
+
+    // If updating reps/repsLeft/repsRight and weight is empty, autofill from placeholder
+    if (
+      (field === "reps" || field === "repsLeft" || field === "repsRight") &&
+      (!set.weight || set.weight === "0") &&
+      previousSetData
+    ) {
+      set.weight = previousSetData.weight.toString();
+    }
+
+    // Update the specified field
+    set[field] = value;
+
+    exercise.setData[setIndex] = set;
     setExercises(updatedExercises);
   };
 
@@ -764,6 +813,84 @@ function CompleteWorkout() {
       return;
     }
 
+    // Check for incomplete data
+    const hasIncompleteData = exercises.some((exercise) =>
+      exercise.setData.some((set) => {
+        if (exercise.singleArm) {
+          return (
+            !set.weight ||
+            !set.repsLeft ||
+            !set.repsRight ||
+            set.weight === "0" ||
+            set.repsLeft === "0" ||
+            set.repsRight === "0"
+          );
+        }
+        return (
+          !set.weight || !set.reps || set.weight === "0" || set.reps === "0"
+        );
+      })
+    );
+
+    if (hasIncompleteData) {
+      Alert.alert(
+        "Incomplete Data",
+        "Some sets have missing weight or rep data.",
+        [
+          {
+            text: "Fill Manually",
+            style: "cancel",
+          },
+          {
+            text: "Auto-fill from Previous",
+            onPress: async () => {
+              const updatedExercises = [...exercises];
+
+              for (let i = 0; i < updatedExercises.length; i++) {
+                const exercise = updatedExercises[i];
+                const previousData = previousWorkoutData[exercise.id] || [];
+
+                for (let j = 0; j < exercise.setData.length; j++) {
+                  const set = exercise.setData[j];
+                  const previousSet = previousData[j];
+
+                  if (previousSet) {
+                    if (exercise.singleArm) {
+                      if (!set.weight || set.weight === "0") {
+                        set.weight = previousSet.weight.toString();
+                      }
+                      if (!set.repsLeft || set.repsLeft === "0") {
+                        set.repsLeft = previousSet.repsLeft?.toString() || "0";
+                      }
+                      if (!set.repsRight || set.repsRight === "0") {
+                        set.repsRight =
+                          previousSet.repsRight?.toString() || "0";
+                      }
+                    } else {
+                      if (!set.weight || set.weight === "0") {
+                        set.weight = previousSet.weight.toString();
+                      }
+                      if (!set.reps || set.reps === "0") {
+                        set.reps = previousSet.reps?.toString() || "0";
+                      }
+                    }
+                  }
+                }
+              }
+
+              setExercises(updatedExercises);
+              await saveWorkout();
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    await saveWorkout();
+  };
+
+  const saveWorkout = async () => {
     try {
       // Transform exercises data for saving
       const exercisesForSaving = exercises.map((exercise) => ({
@@ -788,13 +915,14 @@ function CompleteWorkout() {
         let currentWorkoutId = workoutId;
         if (currentWorkoutId === 0) {
           // This is a quick workout, save it directly to the workout log without creating a routine
-          await saveWorkoutLog(0, exercisesForSaving, workoutName);
+          await saveWorkoutLog(0, exercisesForSaving, workoutName, startTime);
         } else {
           // Save the workout log with the existing workout ID (from a routine)
           await saveWorkoutLog(
             currentWorkoutId,
             exercisesForSaving,
-            workoutName
+            workoutName,
+            startTime
           );
         }
       }
@@ -866,6 +994,23 @@ function CompleteWorkout() {
     </TouchableOpacity>
   );
 
+  const formatDateTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return {
+      date: date.toLocaleDateString("en-GB", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      }),
+      time: date.toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    };
+  };
+
+  const { date, time } = formatDateTime(startTime);
+
   return (
     <View style={styles.container}>
       <View style={styles.topBar}>
@@ -890,6 +1035,11 @@ function CompleteWorkout() {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.dateTimeBar}>
+        <Text style={styles.dateText}>{date}</Text>
+        <Text style={styles.timeText}>Started at {time}</Text>
+      </View>
+
       <ScrollView
         ref={scrollViewRef}
         scrollEnabled={gestureType !== "horizontal"}
@@ -897,6 +1047,7 @@ function CompleteWorkout() {
         showsVerticalScrollIndicator={true}
         style={styles.content}
         contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
       >
         {exercises.map((exercise, exerciseIndex) => (
           <ExerciseRow
@@ -921,6 +1072,9 @@ function CompleteWorkout() {
           <Ionicons name="add-circle-outline" size={24} color="#007AFF" />
           <Text style={styles.addExerciseText}>Add Exercise</Text>
         </TouchableOpacity>
+
+        {/* Add extra padding for keyboard */}
+        <View style={styles.keyboardPadding} />
       </ScrollView>
 
       <Modal
@@ -995,6 +1149,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
+    paddingBottom: 150,
   },
   exerciseCard: {
     backgroundColor: "white",
@@ -1174,6 +1329,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#666",
     marginRight: 8,
+  },
+  dateTimeBar: {
+    backgroundColor: "#f8f8f8",
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e1e1e1",
+  },
+  dateText: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#333",
+  },
+  timeText: {
+    fontSize: 14,
+    color: "#666",
+    marginTop: 2,
+  },
+  keyboardPadding: {
+    height: 150,
   },
 });
 

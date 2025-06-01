@@ -175,10 +175,9 @@ export const initDatabase = async () => {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           workout_id INTEGER,
           workout_name TEXT NOT NULL,
-          date TEXT,
-          start_time TEXT,
-          end_time TEXT,
-          FOREIGN KEY (workout_id) REFERENCES Workouts(id)
+          date TEXT NOT NULL,
+          start_time TEXT NOT NULL,
+          end_time TEXT
         );`
       );
 
@@ -411,19 +410,21 @@ export const saveWorkoutLog = async (
       repsRight?: number;
     }>;
   }>,
-  workoutName: string
+  workoutName: string,
+  startTime: string
 ) => {
   const database = await getDb();
 
   try {
     // Insert workout log and get its ID
     const workoutLogResult = await database.runAsync(
-      "INSERT INTO Workout_Logs (workout_id, workout_name, date, start_time) VALUES (?, ?, ?, ?);",
+      "INSERT INTO Workout_Logs (workout_id, workout_name, date, start_time, end_time) VALUES (?, ?, ?, ?, ?);",
       [
         workoutId,
         workoutName,
         new Date().toISOString(),
-        new Date().toISOString(),
+        startTime,
+        new Date().toISOString(), // End time is now
       ]
     );
     const workoutLogId = workoutLogResult.lastInsertRowId;
@@ -480,7 +481,9 @@ export const getWorkoutLogs = async () => {
         wl.id as log_id,
         wl.date,
         wl.workout_id,
-        wl.workout_name
+        wl.workout_name,
+        wl.start_time,
+        wl.end_time
       FROM Workout_Logs wl
       ORDER BY wl.date DESC;
     `);
@@ -502,13 +505,17 @@ export const getWorkoutLogDetails = async (logId: number) => {
       date: string;
       workout_id: number;
       workout_name: string;
+      start_time: string;
+      end_time: string;
     }>(
       `
       SELECT 
         wl.id as log_id,
         wl.date,
         wl.workout_id,
-        wl.workout_name
+        wl.workout_name,
+        wl.start_time,
+        wl.end_time
       FROM Workout_Logs wl
       WHERE wl.id = ?;
     `,
@@ -593,19 +600,23 @@ export const updateWorkoutLog = async (
 ) => {
   const database = await getDb();
   try {
-    // Update the workout name
+    // Get the existing workout log to preserve the end time
+    const existingLog = await database.getFirstAsync<{
+      end_time: string;
+    }>("SELECT end_time FROM Workout_Logs WHERE id = ?;", [logId]);
+
+    // Update the workout name but keep the existing end time
     await database.runAsync(
       "UPDATE Workout_Logs SET workout_name = ? WHERE id = ?;",
       [workoutName, logId]
     );
 
-    // Get all exercise logs to delete their sets
+    // Delete all sets for each exercise log
     const exerciseLogs = await database.getAllAsync<{ id: number }>(
       "SELECT id FROM Exercise_Logs WHERE workout_log_id = ?;",
       [logId]
     );
 
-    // Delete all sets for each exercise log
     for (const exerciseLog of exerciseLogs) {
       await database.runAsync(
         "DELETE FROM Set_Logs WHERE exercise_log_id = ?;",
