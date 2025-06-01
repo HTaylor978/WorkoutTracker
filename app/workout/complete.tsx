@@ -689,6 +689,11 @@ function CompleteWorkout() {
   };
 
   const handleFinishWorkout = async () => {
+    if (!workoutName.trim()) {
+      Alert.alert("Error", "Please enter a workout name");
+      return;
+    }
+
     try {
       // Transform exercises data for saving
       const exercisesForSaving = exercises.map((exercise) => ({
@@ -707,10 +712,10 @@ function CompleteWorkout() {
 
       if (logId) {
         // Update existing workout log
-        await updateWorkoutLog(logId, exercisesForSaving);
+        await updateWorkoutLog(logId, exercisesForSaving, workoutName);
       } else {
         // Save new workout log
-        await saveWorkoutLog(workoutId, exercisesForSaving);
+        await saveWorkoutLog(workoutId || 0, exercisesForSaving, workoutName);
       }
 
       router.replace("/(tabs)");

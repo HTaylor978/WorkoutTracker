@@ -174,7 +174,10 @@ export const initDatabase = async () => {
         `CREATE TABLE IF NOT EXISTS Workout_Logs (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           workout_id INTEGER,
+          workout_name TEXT NOT NULL,
           date TEXT,
+          start_time TEXT,
+          end_time TEXT,
           FOREIGN KEY (workout_id) REFERENCES Workouts(id)
         );`
       );
@@ -407,15 +410,21 @@ export const saveWorkoutLog = async (
       repsLeft?: number;
       repsRight?: number;
     }>;
-  }>
+  }>,
+  workoutName: string
 ) => {
   const database = await getDb();
 
   try {
     // Insert workout log and get its ID
     const workoutLogResult = await database.runAsync(
-      "INSERT INTO Workout_Logs (workout_id, date) VALUES (?, ?);",
-      [workoutId, new Date().toISOString()]
+      "INSERT INTO Workout_Logs (workout_id, workout_name, date, start_time) VALUES (?, ?, ?, ?);",
+      [
+        workoutId,
+        workoutName,
+        new Date().toISOString(),
+        new Date().toISOString(),
+      ]
     );
     const workoutLogId = workoutLogResult.lastInsertRowId;
 
@@ -591,10 +600,17 @@ export const updateWorkoutLog = async (
       repsLeft?: number;
       repsRight?: number;
     }>;
-  }>
+  }>,
+  workoutName: string
 ) => {
   const database = await getDb();
   try {
+    // Update the workout name
+    await database.runAsync(
+      "UPDATE Workout_Logs SET workout_name = ? WHERE id = ?;",
+      [workoutName, logId]
+    );
+
     // Get all exercise logs to delete their sets
     const exerciseLogs = await database.getAllAsync<{ id: number }>(
       "SELECT id FROM Exercise_Logs WHERE workout_log_id = ?;",
