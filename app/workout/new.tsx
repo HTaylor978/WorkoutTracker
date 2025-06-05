@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
+  Dimensions,
   ScrollView,
   StyleSheet,
   Switch,
@@ -19,6 +20,8 @@ import {
   updateWorkout,
 } from "../utils/database";
 
+const TILE_WIDTH = Dimensions.get("window").width - 32; // Full width minus padding
+
 interface Exercise {
   id: number;
   exercise_name: string;
@@ -30,6 +33,90 @@ interface WorkoutExercise {
   sets: number;
   singleArm: boolean;
 }
+
+interface ExerciseItemProps {
+  exercise: WorkoutExercise;
+  index: number;
+  onUpdateSets: (index: number, increment: boolean) => void;
+  onToggleSingleArm: (index: number) => void;
+  onRemove: (index: number, name: string) => void;
+}
+
+const ExerciseItem: React.FC<ExerciseItemProps> = ({
+  exercise,
+  index,
+  onUpdateSets,
+  onToggleSingleArm,
+  onRemove,
+}) => {
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  return (
+    <View style={styles.exerciseItem}>
+      <ScrollView
+        ref={scrollViewRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        pagingEnabled
+        snapToInterval={TILE_WIDTH}
+        decelerationRate="fast"
+      >
+        <View style={styles.exerciseContent}>
+          <View style={styles.exerciseHeader}>
+            <Text style={styles.exerciseName}>{exercise.name}</Text>
+            <View style={styles.singleArmControl}>
+              <Text style={styles.singleArmLabel}>Unilateral</Text>
+              <Switch
+                value={exercise.singleArm}
+                onValueChange={() => onToggleSingleArm(index)}
+              />
+            </View>
+          </View>
+          <View style={styles.setsControl}>
+            <TouchableOpacity
+              onPress={() => onUpdateSets(index, false)}
+              style={styles.setButton}
+            >
+              <Ionicons name="remove-circle" size={24} color="#007AFF" />
+            </TouchableOpacity>
+            <Text style={styles.setsText}>{exercise.sets} sets</Text>
+            <TouchableOpacity
+              onPress={() => onUpdateSets(index, true)}
+              style={styles.setButton}
+            >
+              <Ionicons name="add-circle" size={24} color="#007AFF" />
+            </TouchableOpacity>
+          </View>
+        </View>
+        <TouchableOpacity
+          style={styles.removeButton}
+          onPress={() => {
+            Alert.alert(
+              "Delete Exercise",
+              `Are you sure you want to remove ${exercise.name} from this workout?`,
+              [
+                {
+                  text: "Cancel",
+                  style: "cancel",
+                  onPress: () => {
+                    scrollViewRef.current?.scrollTo({ x: 0, animated: true });
+                  },
+                },
+                {
+                  text: "Delete",
+                  style: "destructive",
+                  onPress: () => onRemove(index, exercise.name),
+                },
+              ]
+            );
+          }}
+        >
+          <Ionicons name="trash-outline" size={24} color="white" />
+        </TouchableOpacity>
+      </ScrollView>
+    </View>
+  );
+};
 
 function CreateWorkout() {
   const router = useRouter();
@@ -141,6 +228,12 @@ function CreateWorkout() {
     setExercises(updatedExercises);
   };
 
+  const handleRemoveExercise = (index: number, name: string) => {
+    const updatedExercises = [...exercises];
+    updatedExercises.splice(index, 1);
+    setExercises(updatedExercises);
+  };
+
   const handleSaveWorkout = async () => {
     if (!workoutName.trim()) return;
 
@@ -215,33 +308,14 @@ function CreateWorkout() {
       {/* Exercise List */}
       <ScrollView style={styles.exerciseList}>
         {exercises.map((exercise, index) => (
-          <View key={`${exercise.id}-${index}`} style={styles.exerciseItem}>
-            <View style={styles.exerciseHeader}>
-              <Text style={styles.exerciseName}>{exercise.name}</Text>
-              <View style={styles.singleArmControl}>
-                <Text style={styles.singleArmLabel}>Unilateral</Text>
-                <Switch
-                  value={exercise.singleArm}
-                  onValueChange={() => handleToggleSingleArm(index)}
-                />
-              </View>
-            </View>
-            <View style={styles.setsControl}>
-              <TouchableOpacity
-                onPress={() => handleUpdateSets(index, false)}
-                style={styles.setButton}
-              >
-                <Ionicons name="remove-circle" size={24} color="#007AFF" />
-              </TouchableOpacity>
-              <Text style={styles.setsText}>{exercise.sets} sets</Text>
-              <TouchableOpacity
-                onPress={() => handleUpdateSets(index, true)}
-                style={styles.setButton}
-              >
-                <Ionicons name="add-circle" size={24} color="#007AFF" />
-              </TouchableOpacity>
-            </View>
-          </View>
+          <ExerciseItem
+            key={`${exercise.id}-${index}`}
+            exercise={exercise}
+            index={index}
+            onUpdateSets={handleUpdateSets}
+            onToggleSingleArm={handleToggleSingleArm}
+            onRemove={handleRemoveExercise}
+          />
         ))}
 
         {/* Add Exercise Button */}
@@ -304,12 +378,6 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
-  workoutNameLabel: {
-    fontSize: 14,
-    color: "#666",
-    marginBottom: 8,
-    fontWeight: "500",
-  },
   workoutNameInput: {
     fontSize: 16,
     color: "#333",
@@ -322,7 +390,6 @@ const styles = StyleSheet.create({
   exerciseItem: {
     backgroundColor: "white",
     borderRadius: 10,
-    padding: 16,
     marginBottom: 12,
     shadowColor: "#000",
     shadowOffset: {
@@ -332,6 +399,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3,
     elevation: 3,
+    overflow: "hidden",
+  },
+  exerciseContent: {
+    width: TILE_WIDTH,
+    padding: 16,
   },
   exerciseHeader: {
     flexDirection: "row",
@@ -374,14 +446,20 @@ const styles = StyleSheet.create({
     minWidth: 50,
     textAlign: "center",
   },
+  removeButton: {
+    width: TILE_WIDTH,
+    backgroundColor: "#FF3B30",
+    justifyContent: "center",
+    alignItems: "center",
+  },
   addExerciseButton: {
-    marginBottom: 32, // Add extra margin at the bottom for better scrolling
+    marginBottom: 32,
   },
   addExerciseContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    padding: 8,
+    padding: 16,
   },
   addExerciseText: {
     marginLeft: 8,

@@ -510,7 +510,7 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Workout Tracker</Text>
+        <Text style={styles.title}>Workouts</Text>
         <Link href="/workout/select" asChild>
           <TouchableOpacity style={styles.addButton}>
             <Ionicons name="add" size={24} color="white" />
@@ -551,13 +551,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    backgroundColor: "#007AFF",
     padding: 16,
     paddingTop: 60,
-    backgroundColor: "#007AFF",
   },
   title: {
-    fontSize: 24,
-    fontWeight: "bold",
+    fontSize: 20,
+    fontWeight: "600",
     color: "white",
   },
   addButton: {

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Link, Stack, useRouter } from "expo-router";
+import { Link, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   Alert,
@@ -19,6 +19,7 @@ interface Exercise {
 
 export default function SelectExercise() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ fromStats?: string }>();
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [filteredExercises, setFilteredExercises] = useState<Exercise[]>([]);
@@ -46,18 +47,34 @@ export default function SelectExercise() {
   }, [searchQuery, exercises]);
 
   const handleSelectExercise = (exercise: Exercise) => {
-    // Pass back the selected exercise
-    if (router.canGoBack()) {
-      router.back();
-      // Use a small delay to ensure the params are set after navigation
-      setTimeout(() => {
-        router.setParams({
+    console.log("Selecting exercise:", exercise);
+    console.log("fromStats param:", params.fromStats);
+
+    if (params.fromStats) {
+      console.log("Navigating to stats with exercise:", {
+        selectedExerciseId: exercise.id.toString(),
+        selectedExerciseName: exercise.exercise_name,
+      });
+      router.replace({
+        pathname: "/(tabs)/stats",
+        params: {
           selectedExerciseId: exercise.id.toString(),
           selectedExerciseName: exercise.exercise_name,
-        });
-      }, 0);
+        },
+      });
     } else {
-      router.replace("/");
+      // Handle selection for workout creation
+      if (router.canGoBack()) {
+        router.back();
+        setTimeout(() => {
+          router.setParams({
+            selectedExerciseId: exercise.id.toString(),
+            selectedExerciseName: exercise.exercise_name,
+          });
+        }, 0);
+      } else {
+        router.replace("/");
+      }
     }
   };
 
@@ -73,17 +90,20 @@ export default function SelectExercise() {
             <Ionicons name="arrow-back" size={24} color="white" />
           </TouchableOpacity>
           <Text style={styles.title}>Select Exercise</Text>
-          <Link
-            href={{
-              pathname: "/exercise/create",
-              params: { initialName: searchQuery },
-            }}
-            asChild
-          >
-            <TouchableOpacity style={styles.createButton}>
-              <Ionicons name="add" size={24} color="white" />
-            </TouchableOpacity>
-          </Link>
+          {!params.fromStats && (
+            <Link
+              href={{
+                pathname: "/exercise/create",
+                params: { initialName: searchQuery },
+              }}
+              asChild
+            >
+              <TouchableOpacity style={styles.createButton}>
+                <Ionicons name="add" size={24} color="white" />
+              </TouchableOpacity>
+            </Link>
+          )}
+          {params.fromStats && <View style={styles.placeholder} />}
         </View>
 
         <View style={styles.searchContainer}>
@@ -143,6 +163,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.3)",
     justifyContent: "center",
     alignItems: "center",
+  },
+  placeholder: {
+    width: 40,
   },
   searchContainer: {
     flexDirection: "row",

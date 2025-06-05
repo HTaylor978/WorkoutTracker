@@ -20,13 +20,15 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   header: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#007AFF",
     padding: 16,
     paddingTop: 60,
-    backgroundColor: "#007AFF",
   },
   title: {
-    fontSize: 24,
-    fontWeight: "bold",
+    fontSize: 20,
+    fontWeight: "600",
     color: "white",
   },
   content: {

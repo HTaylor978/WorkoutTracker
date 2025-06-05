@@ -918,47 +918,40 @@ export const getPreviousExerciseData = async (
 ) => {
   const database = await getDb();
   try {
-    // Get the most recent workout data for this exercise
-    const previousSets = await database.getAllAsync<{
+    // Get all workout data for this exercise
+    const exerciseSets = await database.getAllAsync<{
       set_number: number;
       weight: number;
       reps: number | null;
       reps_left: number | null;
       reps_right: number | null;
       single_arm: number;
+      date: string;
     }>(
       `
-      WITH LatestWorkout AS (
-        SELECT 
-          wl.id as workout_log_id,
-          wl.date
-        FROM Workout_Logs wl
-        JOIN Exercise_Logs el ON el.workout_log_id = wl.id
-        WHERE el.exercise_id = ? AND wl.date < ?
-        ORDER BY wl.date DESC
-        LIMIT 1
-      )
       SELECT 
         sl.set_number,
         sl.weight,
         sl.reps,
         sl.reps_left,
         sl.reps_right,
-        el.single_arm
-      FROM LatestWorkout lw
-      JOIN Exercise_Logs el ON el.workout_log_id = lw.workout_log_id
+        el.single_arm,
+        wl.date
+      FROM Workout_Logs wl
+      JOIN Exercise_Logs el ON el.workout_log_id = wl.id
       JOIN Set_Logs sl ON sl.exercise_log_id = el.id
-      WHERE el.exercise_id = ?
-      ORDER BY sl.set_number;
+      WHERE el.exercise_id = ? AND wl.date < ?
+      ORDER BY wl.date DESC;
     `,
-      [exerciseId, currentDate, exerciseId]
+      [exerciseId, currentDate]
     );
 
-    if (previousSets.length === 0) {
+    if (exerciseSets.length === 0) {
       return [];
     }
 
-    return previousSets.map((set) => ({
+    return exerciseSets.map((set) => ({
+      date: set.date,
       weight: set.weight,
       ...(set.single_arm === 1
         ? { repsLeft: set.reps_left || 0, repsRight: set.reps_right || 0 }
@@ -967,6 +960,106 @@ export const getPreviousExerciseData = async (
     }));
   } catch (error) {
     console.error("Error getting previous exercise data:", error);
+    throw error;
+  }
+};
+
+// Add test workouts for stats visualization
+export const addTestWorkouts = async () => {
+  const database = await getDb();
+  try {
+    // Get the Bench Press exercise ID
+    const benchPress = await database.getFirstAsync<{ id: number }>(
+      "SELECT id FROM Exercises WHERE exercise_name = 'Bench Press';"
+    );
+
+    if (!benchPress) {
+      throw new Error("Bench Press exercise not found");
+    }
+
+    // Create dates for workouts, starting from 7 days ago
+    const baseDate = new Date();
+    baseDate.setHours(10, 0, 0, 0); // Set to 10 AM
+
+    // First phase: 4-5 workouts at 100kg with increasing reps
+    const phase1Workouts = 4 + Math.floor(Math.random() * 2); // 4 or 5 workouts
+    let startReps = 6;
+
+    for (let i = 0; i < phase1Workouts; i++) {
+      const workoutDate = new Date(baseDate);
+      workoutDate.setDate(workoutDate.getDate() - (7 - i)); // Space workouts 1 day apart
+
+      // Random number of sets (2-3)
+      const numSets = 2 + Math.floor(Math.random() * 2);
+
+      // Create workout log
+      const workoutLogResult = await database.runAsync(
+        "INSERT INTO Workout_Logs (workout_id, workout_name, date, start_time, end_time) VALUES (?, ?, ?, ?, ?);",
+        [
+          0, // Quick workout
+          "Test Workout",
+          workoutDate.toISOString(),
+          workoutDate.toISOString(),
+          new Date(workoutDate.getTime() + 3600000).toISOString(), // 1 hour later
+        ]
+      );
+
+      // Add exercise log
+      const exerciseLogResult = await database.runAsync(
+        "INSERT INTO Exercise_Logs (workout_log_id, exercise_id, single_arm) VALUES (?, ?, ?);",
+        [workoutLogResult.lastInsertRowId, benchPress.id, 0]
+      );
+
+      // Add sets with increasing reps
+      for (let setNum = 1; setNum <= numSets; setNum++) {
+        await database.runAsync(
+          "INSERT INTO Set_Logs (exercise_log_id, set_number, reps, weight) VALUES (?, ?, ?, ?);",
+          [exerciseLogResult.lastInsertRowId, setNum, startReps + i, 100]
+        );
+      }
+    }
+
+    // Second phase: 2-3 workouts at 110kg with reset and increasing reps
+    const phase2Workouts = 2 + Math.floor(Math.random() * 2); // 2 or 3 workouts
+    startReps = 4; // Reset reps for higher weight
+
+    for (let i = 0; i < phase2Workouts; i++) {
+      const workoutDate = new Date(baseDate);
+      workoutDate.setDate(workoutDate.getDate() - (7 - phase1Workouts - i));
+
+      // Random number of sets (2-3)
+      const numSets = 2 + Math.floor(Math.random() * 2);
+
+      // Create workout log
+      const workoutLogResult = await database.runAsync(
+        "INSERT INTO Workout_Logs (workout_id, workout_name, date, start_time, end_time) VALUES (?, ?, ?, ?, ?);",
+        [
+          0,
+          "Test Workout",
+          workoutDate.toISOString(),
+          workoutDate.toISOString(),
+          new Date(workoutDate.getTime() + 3600000).toISOString(),
+        ]
+      );
+
+      // Add exercise log
+      const exerciseLogResult = await database.runAsync(
+        "INSERT INTO Exercise_Logs (workout_log_id, exercise_id, single_arm) VALUES (?, ?, ?);",
+        [workoutLogResult.lastInsertRowId, benchPress.id, 0]
+      );
+
+      // Add sets with increasing reps
+      for (let setNum = 1; setNum <= numSets; setNum++) {
+        await database.runAsync(
+          "INSERT INTO Set_Logs (exercise_log_id, set_number, reps, weight) VALUES (?, ?, ?, ?);",
+          [exerciseLogResult.lastInsertRowId, setNum, startReps + i, 110]
+        );
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error adding test workouts:", error);
     throw error;
   }
 };

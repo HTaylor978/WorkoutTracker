@@ -37,6 +37,7 @@ export default function TabsLayout() {
               color={color}
             />
           ),
+          title: "Workouts",
         }}
       />
       <Tabs.Screen
@@ -49,6 +50,7 @@ export default function TabsLayout() {
               color={color}
             />
           ),
+          title: "Stats",
         }}
       />
       <Tabs.Screen
@@ -61,6 +63,7 @@ export default function TabsLayout() {
               color={color}
             />
           ),
+          title: "Settings",
         }}
       />
     </Tabs>
